@@ -1,0 +1,8 @@
+log/
+__pycache__/
+Surrogate models shared data/
+*.png
+*.h5
+time
+.vscode
+hdf5/
