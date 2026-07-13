@@ -1,0 +1,9 @@
+name: surrogate
+channels:
+  - defaults
+dependencies:
+  - python=3.14
+  - numpy
+  - h5py
+  - matplotlib
+  - pytorch
