@@ -20,17 +20,26 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+SPEED_OF_LIGHT_M_PER_PS = 2e-4
+MICROSECOND_PS = 10**6
+MILLISECOND_PS = 10**9
+SPEED_OF_LIGHT_M_PER_MS = SPEED_OF_LIGHT_M_PER_PS * MILLISECOND_PS
+MICROSECOND_MS = MICROSECOND_PS / MILLISECOND_PS
+
 FIXED_PARAMETERS = {
     "link_distance": 5000.0,
     "memory_efficiency": 0.6,
     "optical_bsm_success_prob": 0.5,
     "detector_efficiency": 0.95,
     "attenuation": 0.0002,
+    "speed_of_light_m_per_ms": SPEED_OF_LIGHT_M_PER_MS,
+    "classical_delay_per_hop_ms": 20 * MICROSECOND_MS,
+    "classical_delay_fixed_overhead_ms": 100 * MICROSECOND_MS,
 }
 FIXED_USER_OPTIONAL_TEXT = {
     "link type": "Meet in the middle",
-    "Entanglement gernation protocol": "Single heralded entanglement generation",
-    "Formalism": "Bell diagonal state",
+    "entanglement gernation protocol": "Single heralded entanglement generation",
+    "formalism": "Bell diagonal state",
 }
 
 LOG_PATTERN = re.compile(
@@ -184,6 +193,9 @@ def write_one_hdf5(parsed: ParsedLog, output_path: Path) -> Path:
         sequence_metadata.attrs["SeQUeNCe_format_version"] = np.uint64(1)
 
         user_optional = metadata.create_group("user_optional")
+        user_optional.attrs["node_count"] = np.uint64(parsed.node_count)
+        if math.isfinite(parsed.swapping_success_prob):
+            user_optional.attrs["swapping_success_prob"] = parsed.swapping_success_prob
         for name, value in FIXED_PARAMETERS.items():
             user_optional.attrs[name] = value
         for name, value in FIXED_USER_OPTIONAL_TEXT.items():
