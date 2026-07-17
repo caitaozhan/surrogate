@@ -6,3 +6,5 @@ Surrogate models shared data/
 time
 .vscode
 hdf5/
+*.log
+*.npz
