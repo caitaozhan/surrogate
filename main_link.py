@@ -59,9 +59,11 @@ if __name__ == "__main__":
 
     tl = topology.tl
 
-    log_filename = args.dir / (f"{config_file}_ld={args.link_distance:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_"
-                               f"a={args.attenuation:g}_cdn={args.classical_delay_node:g}.log")
-    args.dir.mkdir(parents=True, exist_ok=True)
+    file_stem = (f"{config_file}_ld={args.link_distance:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_"
+                 f"a={args.attenuation:g}_cdn={args.classical_delay_node:g}")
+    log_filename = args.dir / "log" / f"{file_stem}.log"
+    h5_filename = args.dir / "h5" / f"{file_stem}.h5"
+    log_filename.parent.mkdir(parents=True, exist_ok=True)
     # log.set_logger(__name__, tl, str(log_filename))
     # log.set_logger_level('DEBUG')
     # log.set_logger_level('INFO')
@@ -102,14 +104,13 @@ if __name__ == "__main__":
         reservation_list.append(reservation)
         tts_list.append(time_to_serve / MILLISECOND)
 
-    parameters = {
-        "link_distance": args.link_distance,
-        "memory_efficiency": args.memory_efficiency,
-        "detector_efficiency": args.detector_efficiency,
-        "attenuation": args.attenuation,
-        "classical_delay_node": args.classical_delay_node,
-    }
-    HDF5(log_filename.with_suffix(".h5")).save_link_data(parameters, tts_list)
+    parameters = {"link_distance": args.link_distance,
+                  "memory_efficiency": args.memory_efficiency,
+                  "detector_efficiency": args.detector_efficiency,
+                  "attenuation": args.attenuation,
+                  "classical_delay_node": args.classical_delay_node}
+    
+    HDF5(h5_filename).save_link_data(parameters, tts_list)
 
     log_samples = list(zip(reservation_list, tts_list))
     if len(log_samples) > 20:
