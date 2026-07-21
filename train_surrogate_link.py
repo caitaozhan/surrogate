@@ -639,7 +639,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--components", type=int, default=8, help="Number of Gaussian mixture components.")
     train_parser.add_argument("--hidden-size", type=int, default=64)
     train_parser.add_argument("--hidden-layers", type=int, default=2)
-    train_parser.add_argument("--epochs", type=int, default=20)
+    train_parser.add_argument("--epochs", type=int, default=50)
     train_parser.add_argument("--batch-size", type=int, default=4096)
     train_parser.add_argument("--learning-rate", type=float, default=1e-3)
     train_parser.add_argument("--weight-decay", type=float, default=1e-5)
