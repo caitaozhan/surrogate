@@ -91,5 +91,24 @@ def main():
     run_tasks(tasks, parallel, runtime_log)
 
 
+def main_testing():
+    """Define the parameter grid and run all link simulations."""
+    command = ["python", "main_link.py"]                                  # 80 in total
+    link_distance = list(range(2000, 20001, 4000))                        # 5 values
+    memory_efficiency = np.linspace(0.55, 0.67, 2).round(2).tolist()      # 2 values
+    detector_efficiency = np.linspace(0.91, 0.944, 2).round(2).tolist()   # 2 values
+    attenuation = np.linspace(0.00025, 0.00033, 2).round(5).tolist()      # 2 values
+    classical_delay_node = np.linspace(0.025, 0.077, 2).round(3).tolist() # 2 values
+    log_dir = "link/testing"
+    runtime_log = "runtime.log"
+    parallel = 7
+
+    parameter_grid = list(itertools.product(link_distance, memory_efficiency, detector_efficiency, attenuation, classical_delay_node))
+    tasks = build_task(command, parameter_grid, log_dir)
+    print(f"Generated {len(tasks)} simulation task(s)")
+    run_tasks(tasks, parallel, runtime_log)
+
+
 if __name__ == "__main__":
-    main()
+    # main()
+    main_testing()

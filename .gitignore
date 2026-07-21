@@ -8,3 +8,4 @@ time
 hdf5/
 *.log
 *.npz
+models/*
