@@ -358,7 +358,7 @@ def evaluate_nll(model, x: np.ndarray, y: np.ndarray, batch_size: int, device: t
 
 
 def train_mdn(train_x: np.ndarray, train_y: np.ndarray, test_x: np.ndarray, test_y: np.ndarray,
-              args: argparse.Namespace) -> tuple[MdnArtifact, dict[str, float]]:
+              args: argparse.Namespace) -> tuple[MdnArtifact, dict[str, Any]]:
     """Train the MDN and retain the state with the best validation NLL.
 
     Args:
@@ -369,7 +369,7 @@ def train_mdn(train_x: np.ndarray, train_y: np.ndarray, test_x: np.ndarray, test
         args (argparse.Namespace): Training hyperparameters.
 
     Returns:
-        tuple[MdnArtifact, dict[str, float]]: Model artifact and final NLL metrics.
+        tuple[MdnArtifact, dict[str, Any]]: Model artifact and NLL history.
     """
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -391,7 +391,10 @@ def train_mdn(train_x: np.ndarray, train_y: np.ndarray, test_x: np.ndarray, test
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, pin_memory=use_cuda)
 
     best_state = copy.deepcopy(model.state_dict())
+    best_epoch = 0
     best_validation_nll = math.inf
+    train_nll_history = []
+    validation_nll_history = []
     training_start_time = time.perf_counter()
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -409,7 +412,10 @@ def train_mdn(train_x: np.ndarray, train_y: np.ndarray, test_x: np.ndarray, test
 
         train_nll = float(np.average(epoch_losses, weights=epoch_weights))
         validation_nll = evaluate_nll(model, test_x, test_y, args.batch_size, args.device)
+        train_nll_history.append(train_nll)
+        validation_nll_history.append(validation_nll)
         if validation_nll < best_validation_nll:
+            best_epoch = epoch
             best_validation_nll = validation_nll
             best_state = copy.deepcopy(model.state_dict())
 
@@ -438,12 +444,18 @@ def train_mdn(train_x: np.ndarray, train_y: np.ndarray, test_x: np.ndarray, test
         "output_transform": "log",
         "dtype": "float32",
     }
-    metrics = {"train_nll": final_train_nll, "validation_nll": final_validation_nll}
+    metrics = {
+        "train_nll": train_nll_history,
+        "validation_nll": validation_nll_history,
+        "best_epoch": best_epoch,
+        "best_train_nll": final_train_nll,
+        "best_validation_nll": final_validation_nll,
+    }
     return artifact, metrics
 
 
 def save_model(model_path: Path, artifact: MdnArtifact, paths: list[Path], train_conditions: int, validation_conditions: int,
-               train_samples: int, validation_samples: int, metrics: dict[str, float], args: argparse.Namespace):
+               train_samples: int, validation_samples: int, metrics: dict[str, Any], args: argparse.Namespace):
     """Save the trained model and training metadata.
 
     Args:
@@ -454,7 +466,7 @@ def save_model(model_path: Path, artifact: MdnArtifact, paths: list[Path], train
         validation_conditions (int): Number of validation conditions.
         train_samples (int): Number of training samples.
         validation_samples (int): Number of validation samples.
-        metrics (dict[str, float]): Final training and validation metrics.
+        metrics (dict[str, Any]): Per-epoch and best-model NLL metrics.
         args (argparse.Namespace): Training hyperparameters.
     """
     model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -584,16 +596,18 @@ def command_train(args: argparse.Namespace):
     del feature_rows, sample_rows, train_indices, validation_indices
 
     artifact, metrics = train_mdn(train_x, train_y, validation_x, validation_y, args)
-    save_model(args.output, artifact, paths, train_condition_count, validation_condition_count, train_x.shape[0], validation_x.shape[0],
+    model_path = args.output.with_name(f"{args.output.stem}_validation_nll={metrics['best_validation_nll']:.10f}{args.output.suffix}")
+    save_model(model_path, artifact, paths, train_condition_count, validation_condition_count, train_x.shape[0], validation_x.shape[0],
                metrics, args)
     print(f"Used {len(paths)} HDF5 file(s)")
     print(f"Training conditions: {train_condition_count}, samples: {train_x.shape[0]}")
     print(f"Validation conditions: {validation_condition_count}, samples: {validation_x.shape[0]}")
     print(f"Features: {', '.join(FEATURE_NAMES)}")
     print(f"Target: {TIME_PATH}")
-    print(f"Wrote model: {args.output}")
-    print(f"Wrote metadata: {args.output.with_suffix('.json')}")
-    print(f"Final NLL: train={metrics['train_nll']:.6g}, validation={metrics['validation_nll']:.6g}")
+    print(f"Wrote model: {model_path}")
+    print(f"Wrote metadata: {model_path.with_suffix('.json')}")
+    print(f"Best epoch: {metrics['best_epoch']}")
+    print(f"Best-model NLL: train={metrics['best_train_nll']:.6g}, validation={metrics['best_validation_nll']:.6g}")
 
 
 def command_predict(args: argparse.Namespace):
@@ -633,7 +647,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--max-samples-per-file", type=int, default=1000, help="Maximum samples used from each HDF5 file.")
     train_parser.add_argument("--seed", type=int, default=7)
     train_parser.add_argument("--device", default="cpu")
-    train_parser.add_argument("--log-interval", type=int, default=10)
+    train_parser.add_argument("--log-interval", type=int, default=1)
     train_parser.set_defaults(func=command_train)
 
     predict_parser = subparsers.add_parser("predict", help="Generate time-to-serve samples for one configuration.")
