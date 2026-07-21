@@ -1,7 +1,6 @@
 """Some utility functions for the simulation.
 """
 
-import json
 from pathlib import Path
 
 import h5py
@@ -44,6 +43,43 @@ class HDF5:
             simulation_log = qnet.create_group("simulation_log")
             simulation_log.create_dataset("time", data=time, compression="gzip", shuffle=True)
 
+    def save_chain_data(self, parameters: dict[str, float | int], time_to_serve: list[float], fidelity: list[float]):
+        """Save repeater-chain parameters, time-to-serve samples, and fidelity samples.
+
+        Args:
+            parameters (dict[str, float | int]): Repeater-chain configuration values.
+            time_to_serve (list[float]): Time-to-serve samples in milliseconds.
+            fidelity (list[float]): Fidelity paired with each time-to-serve sample.
+        """
+        reference_state_dtype = h5py.enum_dtype({"bell_pair": 0}, basetype="i1")
+        log_format_dtype = h5py.enum_dtype({"fidelity": 0, "state_vector": 1, "werner_vector": 2, "density_matrix": 3,
+                                             "pauli_observables": 4}, basetype="i1")
+        simulation_mode_dtype = h5py.enum_dtype({"repeated_single_shot": 0, "stateful": 1}, basetype="i1")
+        time = np.asarray(time_to_serve, dtype=np.float32)
+        state = np.asarray(fidelity, dtype=np.float32)
+        if time.shape != state.shape:
+            raise ValueError("time-to-serve and fidelity must contain the same number of samples")
+        self.filename.parent.mkdir(parents=True, exist_ok=True)
+
+        with h5py.File(self.filename, "w") as h5_file:
+            qnet = h5_file.create_group("qnet")
+            qnet.attrs["format_version"] = np.uint64(1)
+            qnet.attrs["format_version_minor"] = np.uint64(1)
+            qnet.attrs.create("log_format", np.array(0, dtype=log_format_dtype), dtype=log_format_dtype)
+            qnet.attrs.create("reference_state", np.array(0, dtype=reference_state_dtype), dtype=reference_state_dtype)
+            qnet.attrs.create("simulation_mode", np.array(1, dtype=simulation_mode_dtype), dtype=simulation_mode_dtype)
+
+            metadata = qnet.create_group("metadata")
+            sequence_metadata = metadata.create_group("SeQUeNCe")
+            sequence_metadata.attrs["SeQUeNCe_format_version"] = np.uint64(1)
+            user_optional = metadata.create_group("user_optional")
+            for name, value in parameters.items():
+                user_optional.attrs[name] = np.int32(value) if isinstance(value, int) else np.float32(value)
+
+            simulation_log = qnet.create_group("simulation_log")
+            simulation_log.create_dataset("time", data=time, compression="gzip", shuffle=True)
+            simulation_log.create_dataset("state", data=state, compression="gzip", shuffle=True)
+
 
 def classical_delay(distance: float, hop_count: int, classical_delay_node: float, classical_delay_hop: float) -> int:
     """Model the classical delay as a function of distance and hop count
@@ -60,18 +96,15 @@ def classical_delay(distance: float, hop_count: int, classical_delay_node: float
     return int(distance / SPEED_OF_LIGHT + (hop_count * classical_delay_hop + classical_delay_node) * MILLISECOND)
 
 
-def update_cchannel_delay(topo: RouterNetTopo, config_file_name: str, classical_delay_node: float, classical_delay_hop: float):
+def update_cchannel_delay(topo: RouterNetTopo, config: dict, classical_delay_node: float, classical_delay_hop: float):
     """Update the delay of classical channels based on the network topology and classical delay model.
 
     Args:
         topo (RouterNetTopo): the topology of the network
-        config_file_name (str): the name of configuration file
+        config (dict): topology configuration
         classical_delay_node (float): delay at the destination node in milliseconds
         classical_delay_hop (float): delay for each intermediate hop in milliseconds
     """
-    with open(config_file_name, 'r') as f:
-        config = json.load(f)
-    
     graph = Graph()
     for node in config[topo.ALL_NODE]:
         if node[topo.TYPE] == topo.QUANTUM_ROUTER:

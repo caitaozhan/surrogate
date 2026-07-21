@@ -55,7 +55,7 @@ if __name__ == "__main__":
         qchannel['attenuation'] = args.attenuation
 
     topology = RouterNetTopo(config)
-    update_cchannel_delay(topology, config_file_path, classical_delay_node=args.classical_delay_node, classical_delay_hop=0)
+    update_cchannel_delay(topology, config, classical_delay_node=args.classical_delay_node, classical_delay_hop=0)
 
     tl = topology.tl
 

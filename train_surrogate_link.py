@@ -641,12 +641,12 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--hidden-layers", type=int, default=2)
     train_parser.add_argument("--epochs", type=int, default=50)
     train_parser.add_argument("--batch-size", type=int, default=4096)
-    train_parser.add_argument("--learning-rate", type=float, default=1e-3)
+    train_parser.add_argument("--learning-rate", type=float, default=0.0001)
     train_parser.add_argument("--weight-decay", type=float, default=1e-5)
     train_parser.add_argument("--test-fraction", type=float, default=0.2)
     train_parser.add_argument("--max-samples-per-file", type=int, default=1000, help="Maximum samples used from each HDF5 file.")
     train_parser.add_argument("--seed", type=int, default=7)
-    train_parser.add_argument("--device", default="cpu")
+    train_parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     train_parser.add_argument("--log-interval", type=int, default=1)
     train_parser.set_defaults(func=command_train)
 
@@ -656,7 +656,7 @@ def build_parser() -> argparse.ArgumentParser:
     predict_parser.add_argument("--config-file", type=Path, help="Path to a JSON configuration object.")
     predict_parser.add_argument("--sample-count", type=int, default=10000)
     predict_parser.add_argument("--seed", type=int, default=7)
-    predict_parser.add_argument("--device", default="cpu")
+    predict_parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     predict_parser.set_defaults(func=command_predict)
     return parser
 
