@@ -3,7 +3,6 @@ the main for generating data for a link
 '''
 
 import argparse
-import numpy as np
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -17,7 +16,7 @@ from sequence.constants import SECOND, MILLISECOND, SINGLE_HERALDED, BELL_DIAGON
 import sequence.utils.log as log
 from request_app import RequestAppTimeToServe
 from traffic import Traffic
-from utils import update_cchannel_delay
+from utils import HDF5, update_cchannel_delay
 
 EntanglementGenerationA.set_global_type(SINGLE_HERALDED)
 EntanglementGenerationB.set_global_type(SINGLE_HERALDED)
@@ -35,6 +34,7 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--attenuation", type=float, default=0.0002)
     parser.add_argument("-cdn", "--classical_delay_node", type=float, default=0.1, help="classical delay in ms for each node")
     parser.add_argument("-d", "--dir", type=Path, default=Path("link"))
+    parser.add_argument("-st", "--stop_time", type=float, default=5002 * SECOND, help="stop time in seconds")
 
     args = parser.parse_args()
 
@@ -42,6 +42,7 @@ if __name__ == "__main__":
     config_file_path = f"config/{config_file}.json"
     with open(config_file_path, 'r') as f:
         config = json.load(f)
+    config['stop_time'] = args.stop_time
     router_template = config['templates']['router_template']
     router_template['MemoryArray']['efficiency'] = args.memory_efficiency
 
@@ -93,20 +94,22 @@ if __name__ == "__main__":
     tl.run()
 
     time_to_serve_dict = defaultdict(float)
-    fidelity_dict = defaultdict(list)
     for _, app in name_to_app.items():
         time_to_serve_dict |= app.time_to_serve
-        fidelity_dict |= app.entanglement_fidelities
     tts_list = []
-    fidelity_list = []
     reservation_list = []
     for reservation, time_to_serve in sorted(time_to_serve_dict.items()):
-        fidelity = np.average(fidelity_dict[reservation])
-        fidelity_list.append(fidelity)
         reservation_list.append(reservation)
         tts_list.append(time_to_serve / MILLISECOND)
 
-    np.savez_compressed(log_filename.with_suffix(".npz"), time_to_serve=np.asarray(tts_list, dtype=np.float32))
+    parameters = {
+        "link_distance": args.link_distance,
+        "memory_efficiency": args.memory_efficiency,
+        "detector_efficiency": args.detector_efficiency,
+        "attenuation": args.attenuation,
+        "classical_delay_node": args.classical_delay_node,
+    }
+    HDF5(log_filename.with_suffix(".h5")).save_link_data(parameters, tts_list)
 
     log_samples = list(zip(reservation_list, tts_list))
     if len(log_samples) > 20:
@@ -115,4 +118,5 @@ if __name__ == "__main__":
     mylog = open(log_filename, "w")
     for reservation, time_to_serve in log_samples:
         mylog.write(f"{reservation}, {time_to_serve}\n")
+    mylog.write(f"Average time to serve: {sum(tts_list) / len(tts_list):.3f} ms\n")
     mylog.close()

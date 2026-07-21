@@ -3,6 +3,7 @@
 import numpy as np
 import itertools
 import time
+from datetime import timedelta
 from subprocess import PIPE, Popen
 
 
@@ -58,6 +59,13 @@ def run_tasks(tasks: list[list[str]], parallel: int, runtime_log: str):
             runtime_file.flush()
             running.remove((process, task, task_start_time))
 
+        tasks_left = len(pending) + len(running)
+        finished_count = len(tasks) - tasks_left
+        if finished and tasks_left and finished_count >= parallel:
+            elapsed_time = time.perf_counter() - start_time
+            estimated_runtime_left = elapsed_time / finished_count * tasks_left
+            print(f"Estimated runtime left: {timedelta(seconds=round(estimated_runtime_left))}")
+
         time.sleep(0.02)
 
     runtime_file.close()
@@ -67,20 +75,20 @@ def run_tasks(tasks: list[list[str]], parallel: int, runtime_log: str):
 
 def main():
     """Define the parameter grid and run all link simulations."""
-    command = ["python", "main_link.py"]
-    link_distance = list(range(1000, 10001, 1000))                     # 10 values
+    command = ["python", "main_link.py"]                               # 5400 in total
+    link_distance = list(range(1000, 20001, 2000))                     # 10 values
     memory_efficiency = np.linspace(0.5, 1.0, 6).round(2).tolist()     # 6 values
     detector_efficiency = np.linspace(0.9, 1, 6).round(2).tolist()     # 6 values
     attenuation = np.linspace(0.0002, 0.0004, 3).round(5).tolist()     # 3 values
     classical_delay_node = np.linspace(0.02, 0.1, 5).round(3).tolist() # 5 values
-    log_dir = "link"                                                   # 5400 in total
+    log_dir = "link/7.20.2026"
     runtime_log = "runtime.log"
-    parallel = 8
+    parallel = 7
 
     parameter_grid = list(itertools.product(link_distance, memory_efficiency, detector_efficiency, attenuation, classical_delay_node))
     tasks = build_task(command, parameter_grid, log_dir)
     print(f"Generated {len(tasks)} simulation task(s)")
-    run_tasks(tasks[:8], parallel, runtime_log)
+    run_tasks(tasks, parallel, runtime_log)
 
 
 if __name__ == "__main__":
