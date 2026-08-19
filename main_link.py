@@ -59,10 +59,10 @@ if __name__ == "__main__":
 
     tl = topology.tl
 
-    file_stem = (f"{config_file}_ld={args.link_distance:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_"
+    file_name = (f"{config_file}_ld={args.link_distance:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_"
                  f"a={args.attenuation:g}_cdn={args.classical_delay_node:g}")
-    log_filename = args.dir / "log" / f"{file_stem}.log"
-    h5_filename = args.dir / "h5" / f"{file_stem}.h5"
+    log_filename = args.dir / "log" / f"{file_name}.log"
+    h5_filename = args.dir / "h5" / f"{file_name}.h5"
     log_filename.parent.mkdir(parents=True, exist_ok=True)
     # log.set_logger(__name__, tl, str(log_filename))
     # log.set_logger_level('DEBUG')
