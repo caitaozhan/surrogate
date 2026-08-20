@@ -9,11 +9,10 @@ from sequence.entanglement_management.swapping import EntanglementSwappingA, Ent
 from sequence.kernel.quantum_manager import QuantumManager
 from sequence.topology.router_net_topo import RouterNetTopo
 from sequence.utils.config_generator_cli import generate_config
-from sequence.utils.graphs import build_linear
 from sequence.constants import MILLISECOND, SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM
 from request_app import RequestAppTimeToServe
 from traffic import Traffic
-from utils import HDF5, update_cchannel_delay
+from utils import HDF5, build_linear_variable_length, update_cchannel_delay
 
 
 EntanglementGenerationA.set_global_type(SINGLE_HERALDED)
@@ -24,12 +23,12 @@ EntanglementSwappingB.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
 QuantumManager.set_global_manager_formalism(BELL_DIAGONAL_STATE_FORMALISM)
 
 
-def generate_linear_config(args) -> tuple[dict, dict]:
+def generate_linear_config(args) -> dict:
     """
     Generate a configuration template for a linear quantum repeater chain.
     """
     
-    # contains # 8, 2, 9, 6, 3
+    # contains # 7, 2, 8, 6, 3
     template = {
         "router_template": {
             "routing": "routing_distributed",
@@ -54,19 +53,19 @@ def generate_linear_config(args) -> tuple[dict, dict]:
         }
     }
 
-    # contains # 6, 1, 4
-    nodes = args.number_of_nodes
-    length = args.link_distance / 1000
+    # contains # 1, 4
+    lengths = [distance / 1000 for distance in args.link_distances]
+    nodes = len(lengths) + 1
     attenuation = args.attenuation
     cc_delay = 0
     memory_size = 5
-    output = f'linear_{args.number_of_nodes}.json'
+    output = f'linear_{nodes}.json'
     directory = 'config'
     stop_time = args.stop_time
     formalism = BELL_DIAGONAL_STATE_FORMALISM
     measurement_fidelity = 0.99
     gate_fidelity = 0.99
-    g = build_linear(nodes, length, attenuation)
+    g = build_linear_variable_length(lengths, attenuation)
     config, _ = generate_config(g, cc_delay, memory_size, output, directory, stop_time, formalism, template, measurement_fidelity, gate_fidelity)
     return config
 
@@ -74,35 +73,39 @@ def generate_linear_config(args) -> tuple[dict, dict]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # same arguments as the link
-    parser.add_argument("-ld", "--link_distance", type=float, default=5000.0, help="1: distance in meters between two adjacent nodes")
+    parser.add_argument("-lds", "--link_distances", type=float, nargs="+", default=[5000.0, 5000.0],
+                        help="1: distances in meters between adjacent nodes")
     parser.add_argument("-me", "--memory_efficiency", type=float, default=0.7, help="2: efficiency of the memory qubits")
     parser.add_argument("-de", "--detector_efficiency", type=float, default=0.95, help="3: efficiency of the detectors")
     parser.add_argument("-a", "--attenuation", type=float, default=0.0002, help="4: attenuation of the channel")
     parser.add_argument("-cdn", "--classical_delay_node", type=float, default=0.1, help="5: classical delay in ms for each node")
     # Additional arguments for the chain
-    parser.add_argument("-n", "--number_of_nodes", type=int, default=3, help="6: number of nodes in the chain")
-    parser.add_argument("-sp", "--swapping_probability", type=float, default=0.9, help="7: probability of successful entanglement swapping")
-    parser.add_argument("-if", "--initial_fidelity", type=float, default=0.95, help="8: initial fidelity of link entangled pairs")
-    parser.add_argument("-ct", "--coherence_time", type=float, default=2.0, help="9: coherence time in seconds for each memory qubit")
-    parser.add_argument("-cdh", "--classical_delay_hop", type=float, default=0.02, help="10: classical delay in ms for each intermediate hop")
+    parser.add_argument("-sp", "--swapping_probability", type=float, default=0.9, help="6: probability of successful entanglement swapping")
+    parser.add_argument("-if", "--initial_fidelity", type=float, default=0.95, help="7: initial fidelity of link entangled pairs")
+    parser.add_argument("-ct", "--coherence_time", type=float, default=2.0, help="8: coherence time in seconds for each memory qubit")
+    parser.add_argument("-cdh", "--classical_delay_hop", type=float, default=0.02, help="9: classical delay in ms for each intermediate hop")
+    # simulation parameters
     parser.add_argument("-d", "--dir", type=Path, default=Path("chain"))
     parser.add_argument("-st", "--stop_time", type=float, default=2002, help="stop time in seconds")
     args = parser.parse_args()
+    number_of_nodes = len(args.link_distances) + 1
 
     config = generate_linear_config(args)
 
     topology = RouterNetTopo(config)
-    # contains # 5, 10
+    # contains # 5, 9
     update_cchannel_delay(topology, config, args.classical_delay_node, args.classical_delay_hop)
     tl = topology.tl
 
-    file_name = (f"n_{args.number_of_nodes}_sp={args.swapping_probability:g}_if={args.initial_fidelity:g}_ct={args.coherence_time:g}_cdh={args.classical_delay_hop:g}_"
-                 f"ld={args.link_distance:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_a={args.attenuation:g}_cdn={args.classical_delay_node:g}")
+    link_distances = "-".join(f"{distance:g}" for distance in args.link_distances)
+    file_name = (f"n={number_of_nodes}_lds={link_distances}_sp={args.swapping_probability:g}_if={args.initial_fidelity:g}_ct={args.coherence_time:g}_"
+                 f"cdh={args.classical_delay_hop:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_"
+                 f"a={args.attenuation:g}_cdn={args.classical_delay_node:g}")
     log_filename = args.dir / "log" / f"{file_name}.log"
     h5_filename = args.dir / "h5" / f"{file_name}.h5"
     log_filename.parent.mkdir(parents=True, exist_ok=True)
 
-    traffic = Traffic(f'linear_{args.number_of_nodes}', seed=0)
+    traffic = Traffic(f'linear_{number_of_nodes}', seed=0)
     entanglement_number = 1
     name_to_app = {}
     node_seed = 0
@@ -139,8 +142,8 @@ if __name__ == "__main__":
         time_to_serve_list.append(time_to_serve)
         fidelity_list.append(fidelity)
 
-    parameters = {"number_of_nodes": args.number_of_nodes, "swapping_probability": args.swapping_probability,
-                  "link_distance": args.link_distance, "memory_efficiency": args.memory_efficiency,
+    parameters = {"number_of_nodes": number_of_nodes, "swapping_probability": args.swapping_probability,
+                  "link_distances": args.link_distances, "memory_efficiency": args.memory_efficiency,
                   "detector_efficiency": args.detector_efficiency, "attenuation": args.attenuation,
                   "classical_delay_node": args.classical_delay_node, "classical_delay_hop": args.classical_delay_hop,
                   "initial_fidelity": args.initial_fidelity, "coherence_time": args.coherence_time}
