@@ -516,16 +516,21 @@ def train_model(training: list[RepeaterChainData], validation: list[RepeaterChai
     max_links = max(data.link_distances.size for data in training + validation)
     model = build_model(args, max_links).to(args.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=args.lr_reduction_factor,
+                                                           patience=args.lr_patience, threshold=args.lr_threshold,
+                                                           threshold_mode="abs", min_lr=args.min_learning_rate)
     loader = build_loader(training, args.batch_size, True, args.device, args.workers, args.seed)
     best_state = copy.deepcopy(model.state_dict())
     best_epoch = 0
     best_validation_nll = math.inf
     train_nll_history = []
     validation_nll_history = []
+    learning_rate_history = []
     training_start_time = time.perf_counter()
 
     for epoch in range(1, args.epochs + 1):
         model.train()
+        learning_rate = optimizer.param_groups[0]["lr"]
         loss_sum = 0.0
         sample_count = 0
         for batch in loader:
@@ -546,16 +551,21 @@ def train_model(training: list[RepeaterChainData], validation: list[RepeaterChai
         validation_nll = evaluate_nll(model, validation, args.batch_size, args.device, args.workers)
         train_nll_history.append(train_nll)
         validation_nll_history.append(validation_nll)
+        learning_rate_history.append(learning_rate)
         if validation_nll < best_validation_nll:
             best_epoch = epoch
             best_validation_nll = validation_nll
             best_state = copy.deepcopy(model.state_dict())
+        scheduler.step(validation_nll)
+        next_learning_rate = optimizer.param_groups[0]["lr"]
 
         if epoch == 1 or epoch == args.epochs or epoch % args.log_interval == 0:
             elapsed_time = time.perf_counter() - training_start_time
             estimated_runtime_left = elapsed_time / epoch * (args.epochs - epoch)
-            print(f"Epoch {epoch:04d}: train_nll={train_nll:.6g}, validation_nll={validation_nll:.6g}")
+            print(f"Epoch {epoch:04d}: train_nll={train_nll:.6g}, validation_nll={validation_nll:.6g}, learning_rate={learning_rate:.3g}")
             print(f"Estimated runtime left: {timedelta(seconds=round(estimated_runtime_left))}")
+        if next_learning_rate < learning_rate:
+            print(f"Reduced learning rate from {learning_rate:.3g} to {next_learning_rate:.3g} at epoch {epoch}")
 
     model.load_state_dict(best_state)
     final_train_nll = evaluate_nll(model, training, args.batch_size, args.device, args.workers)
@@ -585,6 +595,7 @@ def train_model(training: list[RepeaterChainData], validation: list[RepeaterChai
                 "dtype": "float32"}
     metrics = {"train_nll": train_nll_history,
                "validation_nll": validation_nll_history,
+               "learning_rate": learning_rate_history,
                "best_epoch": best_epoch,
                "best_train_nll": final_train_nll,
                "best_validation_nll": final_validation_nll}
@@ -624,6 +635,12 @@ def save_model(model_path: Path, artifact: MdnArtifact, training: list[RepeaterC
                 "epochs": args.epochs,
                 "batch_size_conditions": args.batch_size,
                 "learning_rate": args.learning_rate,
+                "lr_scheduler": "ReduceLROnPlateau",
+                "lr_reduction_factor": args.lr_reduction_factor,
+                "lr_patience": args.lr_patience,
+                "lr_threshold": args.lr_threshold,
+                "lr_threshold_mode": "abs",
+                "min_learning_rate": args.min_learning_rate,
                 "weight_decay": args.weight_decay,
                 "gradient_clip": args.gradient_clip,
                 "max_samples_per_file": args.max_samples_per_file,
@@ -761,6 +778,14 @@ def command_train(args: argparse.Namespace):
         raise ValueError("--embedding-dim must be divisible by --attention-heads")
     if args.max_samples_per_file is not None and args.max_samples_per_file < 1:
         raise ValueError("--max-samples-per-file must be positive")
+    if not 0 < args.lr_reduction_factor < 1:
+        raise ValueError("--lr-reduction-factor must be between 0 and 1")
+    if args.lr_patience < 0:
+        raise ValueError("--lr-patience cannot be negative")
+    if args.lr_threshold < 0:
+        raise ValueError("--lr-threshold cannot be negative")
+    if not 0 <= args.min_learning_rate <= args.learning_rate:
+        raise ValueError("--min-learning-rate must be between 0 and --learning-rate")
     args.device = resolve_device(args.device)
     if args.device.type == "cuda":
         print(f"Using device: {args.device} ({torch.cuda.get_device_name(args.device)})")
@@ -827,6 +852,10 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--epochs", type=int, default=200)
     train_parser.add_argument("--batch-size", type=int, default=32, help="Number of complete conditions per batch.")
     train_parser.add_argument("--learning-rate", type=float, default=0.0001)
+    train_parser.add_argument("--lr-reduction-factor", type=float, default=0.5)
+    train_parser.add_argument("--lr-patience", type=int, default=12)
+    train_parser.add_argument("--lr-threshold", type=float, default=0.001)
+    train_parser.add_argument("--min-learning-rate", type=float, default=1e-6)
     train_parser.add_argument("--weight-decay", type=float, default=1e-5)
     train_parser.add_argument("--gradient-clip", type=float, default=1.0)
     train_parser.add_argument("--validation-fraction", type=float, default=0.2)
