@@ -631,8 +631,8 @@ def save_model(model_path: Path, artifact: MdnArtifact, training: list[RepeaterC
                 "validation_condition_count": len(validation),
                 "training_sample_count": sum(data.targets.shape[0] for data in training),
                 "validation_sample_count": sum(data.targets.shape[0] for data in validation),
-                "training_files": [str(data.path) for data in training],
-                "validation_files": [str(data.path) for data in validation],
+                "training_directories": sorted({str(data.path.parent) for data in training}),
+                "validation_directories": sorted({str(data.path.parent) for data in validation}),
                 "metrics": metrics}
     model_path.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
@@ -824,7 +824,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--dropout", type=float, default=0.1)
     train_parser.add_argument("--hidden-size", type=int, default=64)
     train_parser.add_argument("--hidden-layers", type=int, default=2)
-    train_parser.add_argument("--epochs", type=int, default=50)
+    train_parser.add_argument("--epochs", type=int, default=200)
     train_parser.add_argument("--batch-size", type=int, default=32, help="Number of complete conditions per batch.")
     train_parser.add_argument("--learning-rate", type=float, default=0.0001)
     train_parser.add_argument("--weight-decay", type=float, default=1e-5)
