@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import h5py
 import numpy as np
@@ -716,19 +716,15 @@ def build_model_from_artifact(artifact: MdnArtifact) -> ChainTransformerMdn:
                                max_links=int(artifact["max_links"]))
 
 
-def sample_from_model(artifact: MdnArtifact, config: dict[str, Any], sample_count: int, seed: int,
-                      device: torch.device) -> np.ndarray:
-    """Generate paired time-fidelity samples for one repeater-chain condition.
+def validate_condition(artifact: MdnArtifact, config: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+    """Validate one chain condition and return its link distances and global features.
 
     Args:
         artifact (MdnArtifact): Trained model and normalization metadata.
         config (dict[str, Any]): Link distances and homogeneous chain features.
-        sample_count (int): Number of paired samples to generate.
-        seed (int): PyTorch random seed.
-        device (torch.device): PyTorch execution device.
 
     Returns:
-        np.ndarray: Generated rows of time in milliseconds and fidelity.
+        tuple[np.ndarray, np.ndarray]: Link distances and globals ordered by GLOBAL_FEATURE_NAMES.
     """
     missing = [name for name in (LINK_DISTANCES_NAME, *GLOBAL_FEATURE_NAMES) if name not in config]
     if missing:
@@ -743,29 +739,69 @@ def sample_from_model(artifact: MdnArtifact, config: dict[str, Any], sample_coun
         raise ValueError("prediction features must be finite")
     if "number_of_nodes" in config and int(config["number_of_nodes"]) != link_distances.size + 1:
         raise ValueError(f"number_of_nodes must equal len({LINK_DISTANCES_NAME}) + 1")
+    return link_distances, global_features
+
+
+def build_condition_sampler(artifact: MdnArtifact, device: torch.device) -> Callable[..., np.ndarray]:
+    """Build the model once and return a sampler reusable across many chain conditions.
+
+    Rebuilding the model per condition dominates the cost of a sweep over a whole testing set, so
+    callers that score many conditions should build one sampler and call it repeatedly.
+
+    Args:
+        artifact (MdnArtifact): Trained model and normalization metadata.
+        device (torch.device): PyTorch execution device.
+
+    Returns:
+        Callable[..., np.ndarray]: Callable taking (config, sample_count, seed) and returning rows
+            of time in milliseconds and fidelity.
+    """
+    model = build_model_from_artifact(artifact).to(device)
+    model.load_state_dict(artifact["state_dict"])
+    model.eval()
 
     distance_mean = np.asarray(artifact["distance_mean"], dtype=np.float32)
     distance_std = np.asarray(artifact["distance_std"], dtype=np.float32)
     global_mean = np.asarray(artifact["global_mean"], dtype=np.float32)
     global_std = np.asarray(artifact["global_std"], dtype=np.float32)
-    standardized_distances = (link_distances - distance_mean[0]) / distance_std[0]
-    standardized_globals = (global_features - global_mean) / global_std
-
-    torch.manual_seed(seed)
-    model = build_model_from_artifact(artifact).to(device)
-    model.load_state_dict(artifact["state_dict"])
-    model.eval()
-    with torch.no_grad():
-        distance_tensor = torch.from_numpy(standardized_distances[None, :, None]).to(device)
-        padding_mask = torch.zeros((1, link_distances.size), dtype=torch.bool, device=device)
-        global_tensor = torch.from_numpy(standardized_globals[None]).to(device)
-        distribution = mdn_distribution(model, distance_tensor, padding_mask, global_tensor)
-        standardized_samples = distribution.sample((sample_count,))[:, 0].cpu().numpy()
-
     target_mean = np.asarray(artifact["target_mean"], dtype=np.float32)
     target_std = np.asarray(artifact["target_std"], dtype=np.float32)
-    transformed_samples = standardized_samples * target_std + target_mean
-    return inverse_transform_targets(transformed_samples)
+
+    def sample(config: dict[str, Any], sample_count: int, seed: int) -> np.ndarray:
+        """Generate paired time-fidelity samples for one repeater-chain condition."""
+        link_distances, global_features = validate_condition(artifact, config)
+        standardized_distances = (link_distances - distance_mean[0]) / distance_std[0]
+        standardized_globals = (global_features - global_mean) / global_std
+
+        torch.manual_seed(seed)
+        with torch.no_grad():
+            distance_tensor = torch.from_numpy(standardized_distances[None, :, None]).to(device)
+            padding_mask = torch.zeros((1, link_distances.size), dtype=torch.bool, device=device)
+            global_tensor = torch.from_numpy(standardized_globals[None]).to(device)
+            distribution = mdn_distribution(model, distance_tensor, padding_mask, global_tensor)
+            standardized_samples = distribution.sample((sample_count,))[:, 0].cpu().numpy()
+
+        transformed_samples = standardized_samples * target_std + target_mean
+        return inverse_transform_targets(transformed_samples)
+
+    return sample
+
+
+def sample_from_model(artifact: MdnArtifact, config: dict[str, Any], sample_count: int, seed: int,
+                      device: torch.device) -> np.ndarray:
+    """Generate paired time-fidelity samples for one repeater-chain condition.
+
+    Args:
+        artifact (MdnArtifact): Trained model and normalization metadata.
+        config (dict[str, Any]): Link distances and homogeneous chain features.
+        sample_count (int): Number of paired samples to generate.
+        seed (int): PyTorch random seed.
+        device (torch.device): PyTorch execution device.
+
+    Returns:
+        np.ndarray: Generated rows of time in milliseconds and fidelity.
+    """
+    return build_condition_sampler(artifact, device)(config, sample_count, seed)
 
 
 def command_train(args: argparse.Namespace):
@@ -841,12 +877,12 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--input", type=Path, nargs="+", default=[Path("chain/training/h5")],
                               help="HDF5 file(s) or directory tree(s). Defaults to chain/training/h5.")
     train_parser.add_argument("--output", type=Path, default=Path("models/chain_transformer_mdn.pt"))
-    train_parser.add_argument("--components", type=int, default=8)
+    train_parser.add_argument("--components", type=int, default=12)
     train_parser.add_argument("--embedding-dim", type=int, default=64)
     train_parser.add_argument("--transformer-layers", type=int, default=2)
     train_parser.add_argument("--attention-heads", type=int, default=4)
     train_parser.add_argument("--feedforward-dim", type=int, default=128)
-    train_parser.add_argument("--dropout", type=float, default=0.1)
+    train_parser.add_argument("--dropout", type=float, default=0.02)
     train_parser.add_argument("--hidden-size", type=int, default=64)
     train_parser.add_argument("--hidden-layers", type=int, default=2)
     train_parser.add_argument("--epochs", type=int, default=200)
