@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from sequence.entanglement_management.generation import EntanglementGenerationA, EntanglementGenerationB
-from sequence.entanglement_management.purification import BBPSSWProtocol
+from sequence.entanglement_management.purification import PurificationProtocol
 from sequence.entanglement_management.swapping import EntanglementSwappingA, EntanglementSwappingB
 from sequence.kernel.quantum_manager import QuantumManager
 from sequence.topology.router_net_topo import RouterNetTopo
@@ -17,7 +17,7 @@ from utils import HDF5, build_linear_variable_length, update_cchannel_delay
 
 EntanglementGenerationA.set_global_type(SINGLE_HERALDED)
 EntanglementGenerationB.set_global_type(SINGLE_HERALDED)
-BBPSSWProtocol.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
+PurificationProtocol.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
 EntanglementSwappingA.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
 EntanglementSwappingB.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
 QuantumManager.set_global_manager_formalism(BELL_DIAGONAL_STATE_FORMALISM)
@@ -59,8 +59,10 @@ def generate_linear_config(args) -> dict:
     attenuation = args.attenuation
     cc_delay = 0
     memory_size = 5
-    output = f'linear_{nodes}.json'
-    directory = 'config'
+    # output = f'linear_{nodes}.json'
+    # directory = 'config'
+    output = None
+    directory = None
     stop_time = args.stop_time
     formalism = BELL_DIAGONAL_STATE_FORMALISM
     measurement_fidelity = 0.99
