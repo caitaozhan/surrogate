@@ -7,23 +7,23 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from sequence.entanglement_management.generation import EntanglementGenerationA, EntanglementGenerationB
-from sequence.entanglement_management.purification import PurificationProtocol
-from sequence.entanglement_management.swapping import EntanglementSwappingA, EntanglementSwappingB
-from sequence.kernel.quantum_manager import QuantumManager
-from sequence.topology.router_net_topo import RouterNetTopo
+import sequence as sq
+
+from sequence.utils.classical_delay import update_cchannel_delay
 from sequence.constants import SECOND, MILLISECOND, SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM
+from sequence.resource_management.reservation_rule_registry import EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END
 import sequence.utils.log as log
 from request_app import RequestAppTimeToServe
 from traffic import Traffic
-from utils import HDF5, update_cchannel_delay
+from utils import HDF5
 
-EntanglementGenerationA.set_global_type(SINGLE_HERALDED)
-EntanglementGenerationB.set_global_type(SINGLE_HERALDED)
-PurificationProtocol.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
-EntanglementSwappingA.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
-EntanglementSwappingB.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
-QuantumManager.set_global_manager_formalism(BELL_DIAGONAL_STATE_FORMALISM)
+
+sq.EntanglementGenerationA.set_global_type(SINGLE_HERALDED)
+sq.EntanglementGenerationB.set_global_type(SINGLE_HERALDED)
+sq.PurificationProtocol.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
+sq.EntanglementSwappingA.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
+sq.EntanglementSwappingB.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
+sq.QuantumManager.set_global_manager_formalism(BELL_DIAGONAL_STATE_FORMALISM)
 
 
 if __name__ == "__main__":
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--attenuation", type=float, default=0.0002)
     parser.add_argument("-cdn", "--classical_delay_node", type=float, default=0.1, help="classical delay in ms for each node")
     parser.add_argument("-d", "--dir", type=Path, default=Path("link"))
-    parser.add_argument("-st", "--stop_time", type=float, default=5002 * SECOND, help="stop time in seconds")
+    parser.add_argument("-st", "--stop_time", type=float, default=3 * SECOND, help="stop time in seconds")
 
     args = parser.parse_args()
 
@@ -54,8 +54,14 @@ if __name__ == "__main__":
         qchannel['distance'] = args.link_distance / 2
         qchannel['attenuation'] = args.attenuation
 
-    topology = RouterNetTopo(config)
-    update_cchannel_delay(topology, config, classical_delay_node=args.classical_delay_node, classical_delay_hop=0)
+    topology = sq.RouterNetTopo(config)
+    update_cchannel_delay(topology, classical_delay_node=args.classical_delay_node * 1000, classical_delay_hop=0) # ms to us
+
+    router: sq.QuantumRouter
+    diabled_rules = [EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END]
+    for router in topology.get_nodes_by_type(sq.RouterNetTopo.QUANTUM_ROUTER):
+        for rule in diabled_rules:
+            router.disable_rule(rule)
 
     tl = topology.tl
 
@@ -64,14 +70,12 @@ if __name__ == "__main__":
     log_filename = args.dir / "log" / f"{file_name}.log"
     h5_filename = args.dir / "h5" / f"{file_name}.h5"
     log_filename.parent.mkdir(parents=True, exist_ok=True)
-    # log.set_logger(__name__, tl, str(log_filename))
-    # log.set_logger_level('DEBUG')
-    # log.set_logger_level('INFO')
-    # modules = ['test_swapping_order', 'request_app', 'swapping_bds', 'single_heralded', 'resource_manager', 'memory']
-    # modules = ['main_link']
-
-    # for module in modules:
-    #     log.track_module(module)
+    log.set_logger(__name__, tl, str(log_filename) + '.event')
+    log.set_logger_level('DEBUG')
+    log.set_logger_level('INFO')
+    modules = ['request_app', 'swapping_bds', 'single_heralded', 'resource_manager']
+    for module in modules:
+        log.track_module(module)
 
     traffic_seed = 0
     traffic = Traffic(config_file, seed=traffic_seed)
@@ -79,7 +83,7 @@ if __name__ == "__main__":
 
     name_to_app = {}
     node_seed = 0
-    for router in topology.get_nodes_by_type(RouterNetTopo.QUANTUM_ROUTER):
+    for router in topology.get_nodes_by_type(sq.RouterNetTopo.QUANTUM_ROUTER):
         router.set_seed(node_seed)
         node_seed += 1
         app = RequestAppTimeToServe(router)
@@ -88,7 +92,7 @@ if __name__ == "__main__":
         app.kickoff_the_first_request()
         name_to_app[router.name] = app
     
-    for bsm_node in topology.get_nodes_by_type(RouterNetTopo.BSM_NODE):
+    for bsm_node in topology.get_nodes_by_type(sq.RouterNetTopo.BSM_NODE):
         bsm_node.set_seed(node_seed)
         node_seed += 1
     
