@@ -3,25 +3,16 @@
 import argparse
 from pathlib import Path
 
-from sequence.entanglement_management.generation import EntanglementGenerationA, EntanglementGenerationB
-from sequence.entanglement_management.purification import PurificationProtocol
-from sequence.entanglement_management.swapping import EntanglementSwappingA, EntanglementSwappingB
-from sequence.kernel.quantum_manager import QuantumManager
 from sequence.topology.router_net_topo import RouterNetTopo
 from sequence.utils.classical_delay import update_cchannel_delay
 from sequence.utils.config_generator_cli import generate_config
 from sequence.constants import MILLISECOND, SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM
 from request_app import RequestAppTimeToServe
 from traffic import Traffic
-from utils import HDF5, build_linear_variable_length
+from utils import HDF5, build_linear_variable_length, configure_simulation
 
 
-EntanglementGenerationA.set_global_type(SINGLE_HERALDED)
-EntanglementGenerationB.set_global_type(SINGLE_HERALDED)
-PurificationProtocol.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
-EntanglementSwappingA.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
-EntanglementSwappingB.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
-QuantumManager.set_global_manager_formalism(BELL_DIAGONAL_STATE_FORMALISM)
+configure_simulation(SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM)
 
 
 def generate_linear_config(args) -> dict:

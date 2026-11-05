@@ -15,15 +15,10 @@ from sequence.resource_management.reservation_rule_registry import EP_AWAIT, EP_
 import sequence.utils.log as log
 from request_app import RequestAppTimeToServe
 from traffic import Traffic
-from utils import HDF5
+from utils import HDF5, configure_simulation
 
 
-sq.EntanglementGenerationA.set_global_type(SINGLE_HERALDED)
-sq.EntanglementGenerationB.set_global_type(SINGLE_HERALDED)
-sq.PurificationProtocol.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
-sq.EntanglementSwappingA.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
-sq.EntanglementSwappingB.set_formalism(BELL_DIAGONAL_STATE_FORMALISM)
-sq.QuantumManager.set_global_manager_formalism(BELL_DIAGONAL_STATE_FORMALISM)
+configure_simulation(SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM)
 
 
 if __name__ == "__main__":

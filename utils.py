@@ -5,7 +5,24 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import sequence as sq
 from networkx import Graph, path_graph, set_edge_attributes
+
+
+def configure_simulation(generation_type: str, formalism: str) -> None:
+    """Configure the global generation type and quantum state formalism.
+
+    Args:
+        generation_type (str): Entanglement generation type for both endpoint protocols.
+        formalism (str): Quantum state formalism for purification, swapping, and the quantum manager.
+    """
+    for protocol in (sq.EntanglementGenerationA, sq.EntanglementGenerationB):
+        protocol.set_global_type(generation_type)
+
+    for protocol in (sq.PurificationProtocol, sq.EntanglementSwappingA, sq.EntanglementSwappingB):
+        protocol.set_formalism(formalism)
+
+    sq.QuantumManager.set_global_manager_formalism(formalism)
 
 
 class HDF5:
