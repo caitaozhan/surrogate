@@ -8,7 +8,6 @@ from collections import defaultdict
 from pathlib import Path
 
 import sequence as sq
-
 from sequence.utils.classical_delay import update_cchannel_delay
 from sequence.constants import SECOND, MILLISECOND, SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM
 from sequence.resource_management.reservation_rule_registry import EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END
@@ -17,8 +16,9 @@ from request_app import RequestAppTimeToServe
 from traffic import Traffic
 from utils import HDF5, configure_simulation
 
+from single_heralded_surrogate import SINGLE_HERALDED_SURROGATE
 
-configure_simulation(SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM)
+configure_simulation(SINGLE_HERALDED_SURROGATE, BELL_DIAGONAL_STATE_FORMALISM)
 
 
 if __name__ == "__main__":
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     log_filename.parent.mkdir(parents=True, exist_ok=True)
     log.set_logger(__name__, tl, str(log_filename) + '.event')
     log.set_logger_level('DEBUG')
-    log.set_logger_level('INFO')
+    # log.set_logger_level('INFO')
     modules = ['request_app', 'swapping_bds', 'single_heralded', 'resource_manager']
     for module in modules:
         log.track_module(module)
