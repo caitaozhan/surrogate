@@ -2,7 +2,49 @@
 """
 
 import sequence as sq
+from sequence.message import Message
+
 SINGLE_HERALDED_SURROGATE = "single_heralded_surrogate"
+
+
+class SurrogateGenerationMessage(Message):
+    """Message used by surrogate entanglement generation protocols.
+
+    Attributes:
+        msg_type (sq.GenerationMsgType): defines the message type.
+        receiver (str): name of destination protocol instance.
+        protocol_type (str): identifies the generation protocol.
+        time (int): surrogate time (if `msg_type == NEGOTIATE`).
+        fidelity (float): surrogate fidelity (if `msg_type == NEGOTIATE`).
+    """
+
+    __slots__ = ["time", "fidelity"]
+
+    def __init__(self, msg_type: sq.GenerationMsgType, receiver: str | None, protocol_type: str, **kwargs):
+        super().__init__(msg_type, receiver)
+
+        self.protocol_type = protocol_type
+
+        self.time: int | None = None
+        self.fidelity: float | None = None
+
+        fields = {sq.GenerationMsgType.NEGOTIATE: ["time", "fidelity"],
+                  sq.GenerationMsgType.NEGOTIATE_ACK: []}
+
+        if msg_type in fields:
+            for field in fields[msg_type]:
+                setattr(self, field, kwargs.get(field))
+        else:
+            raise ValueError(f"SurrogateGeneration generated invalid message type {msg_type}")
+
+    def __repr__(self):
+        match self.msg_type:
+            case sq.GenerationMsgType.NEGOTIATE:
+                return f"type: {self.msg_type}, time: {self.time}, fidelity: {self.fidelity}"
+            case sq.GenerationMsgType.NEGOTIATE_ACK:
+                return f"type: {self.msg_type}"
+            case _:
+                raise ValueError(f"SurrogateGeneration generated invalid message type {self.msg_type}")
 
 
 @sq.EntanglementGenerationA.register(SINGLE_HERALDED_SURROGATE)
@@ -70,11 +112,38 @@ class SingleHeraldedASurrogate(sq.SingleHeraldedA):
 
     def surrogate_is_ready(self) -> bool:
         """Check if the surrogate parameters are all set.
+
+        Return:
+            True if all surrogate parameters are set, False otherwise.
         """
         if (self.memory_efficiency and self.qchannel_transmission_probability and self.detector_efficiency 
                 and self.bsm_success_rate):
             return True
         return False
+
+    def start(self) -> None:
+        """Method to start "one round" in the entanglement generation protocol (there are two rounds in Barrett-Kok).
+
+        Will start negotiations with other protocol (if primary).
+
+        Side Effects:
+            Will send message through attached node.
+        """
+        if not self.surrogate_is_ready():
+            super().start()
+        else:
+            sq.log.logger.info(f"{self.owner.name} {self.name} protocol start with partner {self.remote_protocol_name}")
+
+            # if self not in self.owner.protocols:
+            #     return
+
+            # if self.update_memory() and self.primary:
+            #     self.qc_delay = self.owner.qchannels[self.middle].delay
+            #     message = sq.EntanglementGenerationMessage(sq.GenerationMsgType.NEGOTIATE,
+            #                                                 self.remote_protocol_name,
+            #                                                 protocol_type=self.protocol_type,
+            #                                                 qc_delay=self.qc_delay)
+            #     self.owner.send_message(self.remote_node_name, message)
 
 
 @sq.EntanglementGenerationB.register(SINGLE_HERALDED_SURROGATE)
