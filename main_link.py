@@ -1,12 +1,10 @@
 '''
 the main for generating data for a link
 '''
-
 import argparse
 import json
 from collections import defaultdict
 from pathlib import Path
-
 import sequence as sq
 from sequence.utils.classical_delay import update_cchannel_delay
 from sequence.constants import SECOND, MILLISECOND, SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM
@@ -15,8 +13,7 @@ import sequence.utils.log as log
 from request_app import RequestAppTimeToServe
 from traffic import Traffic
 from utils import HDF5, configure_simulation
-
-from single_heralded_surrogate import SINGLE_HERALDED_SURROGATE
+from single_heralded_surrogate import SINGLE_HERALDED_SURROGATE, SingleHeraldedASurrogate
 
 configure_simulation(SINGLE_HERALDED_SURROGATE, BELL_DIAGONAL_STATE_FORMALISM)
 
@@ -50,32 +47,31 @@ if __name__ == "__main__":
         qchannel['attenuation'] = args.attenuation
 
     topology = sq.RouterNetTopo(config)
+    tl = topology.tl
     update_cchannel_delay(topology, classical_delay_node=args.classical_delay_node * 1000, classical_delay_hop=0) # ms to us
 
+    # disable purification and swapping
     router: sq.QuantumRouter
     diabled_rules = [EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END]
     for router in topology.get_nodes_by_type(sq.RouterNetTopo.QUANTUM_ROUTER):
         for rule in diabled_rules:
             router.disable_rule(rule)
 
-    tl = topology.tl
-
+    # set log
     file_name = (f"{config_file}_ld={args.link_distance:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_"
                  f"a={args.attenuation:g}_cdn={args.classical_delay_node:g}")
     log_filename = args.dir / "log" / f"{file_name}.log"
-    h5_filename = args.dir / "h5" / f"{file_name}.h5"
     log_filename.parent.mkdir(parents=True, exist_ok=True)
     log.set_logger(__name__, tl, str(log_filename) + '.event')
     log.set_logger_level('DEBUG')
-    # log.set_logger_level('INFO')
     modules = ['request_app', 'swapping_bds', 'single_heralded', 'resource_manager']
     for module in modules:
         log.track_module(module)
 
+    # set traffic and applications
     traffic_seed = 0
     traffic = Traffic(config_file, seed=traffic_seed)
     entanglement_number = 1
-
     name_to_app = {}
     node_seed = 0
     for router in topology.get_nodes_by_type(sq.RouterNetTopo.QUANTUM_ROUTER):
@@ -90,8 +86,10 @@ if __name__ == "__main__":
     for bsm_node in topology.get_nodes_by_type(sq.RouterNetTopo.BSM_NODE):
         bsm_node.set_seed(node_seed)
         node_seed += 1
-    
+
+    # kickoff the simulation
     tl.init()
+    SingleHeraldedASurrogate.set_surrogate_from_timeline(tl)
     tl.run()
 
     time_to_serve_dict = defaultdict(float)
@@ -103,12 +101,12 @@ if __name__ == "__main__":
         reservation_list.append(reservation)
         tts_list.append(time_to_serve / MILLISECOND)
 
-    parameters = {"link_distance": args.link_distance,
-                  "memory_efficiency": args.memory_efficiency,
-                  "detector_efficiency": args.detector_efficiency,
-                  "attenuation": args.attenuation,
+    parameters = {"link_distance": args.link_distance, "memory_efficiency": args.memory_efficiency,
+                  "detector_efficiency": args.detector_efficiency, "attenuation": args.attenuation,
                   "classical_delay_node": args.classical_delay_node}
-    
+
+    # save h5 file and other log data
+    h5_filename = args.dir / "h5" / f"{file_name}.h5"
     HDF5(h5_filename).save_link_data(parameters, tts_list)
 
     log_samples = list(zip(reservation_list, tts_list))
