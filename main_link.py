@@ -89,7 +89,7 @@ if __name__ == "__main__":
 
     # kickoff the simulation
     tl.init()
-    SingleHeraldedASurrogate.set_surrogate_from_timeline(tl)
+    SingleHeraldedASurrogate.set_surrogate_parameter_from_timeline(tl)
     tl.run()
 
     time_to_serve_dict = defaultdict(float)
