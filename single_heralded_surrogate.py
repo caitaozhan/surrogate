@@ -18,20 +18,16 @@ class SurrogateGenerationMessage(Message):
         receiver (str): name of destination protocol instance.
         protocol_type (str): identifies the generation protocol.
         time (int): surrogate time (if `msg_type == NEGOTIATE`).
-        fidelity (float): surrogate fidelity (if `msg_type == NEGOTIATE`).
     """
 
-    __slots__ = ["time", "fidelity"]
+    __slots__ = ["time"]
 
     def __init__(self, msg_type: sq.GenerationMsgType, receiver: str | None, protocol_type: str, **kwargs):
         super().__init__(msg_type, receiver)
-
         self.protocol_type = protocol_type
+        self.time: int | None = None  # the entanglement succeed time computed from the surrogate
 
-        self.time: int | None = None
-        self.fidelity: float | None = None
-
-        fields = {sq.GenerationMsgType.NEGOTIATE: ["time", "fidelity"],
+        fields = {sq.GenerationMsgType.NEGOTIATE: ["time"],
                   sq.GenerationMsgType.NEGOTIATE_ACK: []}
 
         if msg_type in fields:
@@ -43,7 +39,7 @@ class SurrogateGenerationMessage(Message):
     def __repr__(self):
         match self.msg_type:
             case sq.GenerationMsgType.NEGOTIATE:
-                return f"type: {self.msg_type}, time: {self.time}, fidelity: {self.fidelity}"
+                return f"type: {self.msg_type}, time: {self.time}"
             case sq.GenerationMsgType.NEGOTIATE_ACK:
                 return f"type: {self.msg_type}"
             case _:
@@ -55,6 +51,18 @@ class SingleHeraldedASurrogate(sq.SingleHeraldedA):
     """
     A surrogate for SingleHeraldedA. It should behave very similarly to the original 
     SingleHeraldedA protocol performance wise, but will skip a lot of the actual physical operations.
+
+    Instance Attributes:
+        owner (Node): node that protocol instance is attached to.
+        name (str): label for protocol instance.
+        middle (str): name of the middle BSM node.
+        other (str): name of the other end node.
+        memory (Memory): memory object used for entanglement generation.
+        raw_fidelity (float): the raw fidelity of generated entangled pair.
+        raw_epr_errors (list[float]): the raw EPR pair Pauli error rates in X, Y, Z order.
+        bsm_res (list[int]): the BSM measurement results from the middle BSM node.
+        protocol_type (str): The type of the protocol instance.
+        surrogate (tuple[float, rv_discrete_frozen]): (time per attempt, geometric distribution of success attempts)
 
     Class Attributes:
         memory_efficiency (dict[str, float]): Memory name to its efficiency.
@@ -70,7 +78,7 @@ class SingleHeraldedASurrogate(sq.SingleHeraldedA):
     detector_efficiency: dict[str, float] = None               # detector name to efficiency
     bsm_success_rate: dict[str, float] = None                  # BSM name to success rate
     cchannel_delay: dict[str, float] = None                    # classical channel name to its delay
-    surrogates: dict[tuple[str, str], rv_discrete_frozen] = {}  # (primary node, non-primary node) to their surrogate
+    surrogates: dict[tuple[str, str], tuple[float, rv_discrete_frozen]] = {}  # (primary node, non-primary node) to surrogate
 
     def __init__(self, owner: sq.Node, name: str, middle: str, other: str, memory: sq.Memory, 
                  raw_fidelity: float = None, raw_epr_errors: list[float] = None):
@@ -87,7 +95,7 @@ class SingleHeraldedASurrogate(sq.SingleHeraldedA):
         """
         super().__init__(owner, name, middle, other, memory, raw_fidelity, raw_epr_errors)
         self.protocol_type = SINGLE_HERALDED_SURROGATE
-        self.surrogate = None
+        self.surrogate: tuple[float, rv_discrete_frozen] = None
 
     def get_memory_name(self, protocol_name: str) -> str:
         """Get the memory ID associated with the given protocol instance. 
@@ -149,8 +157,8 @@ class SingleHeraldedASurrogate(sq.SingleHeraldedA):
         return f"cc-{node_name}-{other_node_name}"
 
     def get_rtt_count(self) -> float:
-        """If this node appears first in the reservation path, the RTT is 2.5
-           If the remote node appears first in the reservation path, the RTT is 2
+        """The primary node will call this method and if it appears first in the reservation path, the RTT is 2.5
+           Otherwise, the remote node appears first in the reservation path and the RTT is 2
 
         Returns:
             float: The RTT for a single entanglement generation attempt.
@@ -206,15 +214,17 @@ class SingleHeraldedASurrogate(sq.SingleHeraldedA):
                     cchannel = self.get_cchannel_name(self.owner.name, self.remote_node_name)
                     cchannel_delay = self.cchannel_delay[cchannel]
                     # get time per entanglement generation attempt
+                    rtt_time = 2 * cchannel_delay
                     rtt_count = self.get_rtt_count()
-                    time_per_attempt = rtt_count * (2 * cchannel_delay)
+                    time_per_attempt = rtt_count * rtt_time
                     # finally get the expected time for successful entanglement generation
                     expected_time = time_per_attempt / overall_probability
                     # store the expected time for this surrogate
-                    self.surrogate[key] = (geom(overall_probability), time_per_attempt)
+                    self.surrogates[key] = (time_per_attempt, geom(overall_probability))
+                    self.surrogate = self.surrogates[key]
                     sq.log.logger.info(f"Surrogate key: {key}, Overall probability: {overall_probability}, "
                                        f"Time per attempt: {time_per_attempt}, Expected time: {expected_time}")
-        
+
     @classmethod
     def set_surrogate_parameter_from_timeline(cls, timeline: sq.Timeline) -> None:
         """Set the surrogate parameters from the timeline.
@@ -266,20 +276,76 @@ class SingleHeraldedASurrogate(sq.SingleHeraldedA):
             Will send message through attached node.
         """
         if self.surrogate_parameter_is_set():
-            sq.log.logger.info(f"{self.owner.name} {self.name} protocol start with partner {self.remote_protocol_name}")
+            if self not in self.owner.protocols:
+                return
+            text = f"{self.owner.name} {self.name} surrogate protocol start with partner {self.remote_protocol_name}"
+            sq.log.logger.info(text)
+
+            if self.primary:
+                time_per_attempt, geom_distribution = self.surrogate
+                number_of_attempts = geom_distribution.rvs()
+                entanglement_total_time = round(time_per_attempt * number_of_attempts)
+                sq.log.logger.info(f"{self.owner.name} {self.name} surrogate: number of attempts: {number_of_attempts},"
+                                   f" time per attempt: {time_per_attempt}, total time: {entanglement_total_time}")
+                cchannel = self.get_cchannel_name(self.owner.name, self.remote_node_name)
+                cchannel_delay = self.cchannel_delay[cchannel]
+                time_before_start = round(cchannel_delay if self.get_rtt_count() == 2 else 2 * cchannel_delay)
+                entanglement_succeed_time = self.owner.timeline.now() - time_before_start + entanglement_total_time
+                process = sq.Process(self, "entanglement_succeed", [])
+                event = sq.Event(entanglement_succeed_time, process)
+                self.owner.timeline.schedule(event)
+                self.scheduled_events.append(event)
+
+                # send message
+                message = SurrogateGenerationMessage(sq.GenerationMsgType.NEGOTIATE, self.remote_protocol_name,
+                                                     self.protocol_type, time=entanglement_succeed_time)
+                self.owner.send_message(self.remote_node_name, message)
+
         else:
             super().start()
 
-            # if self not in self.owner.protocols:
-            #     return
+    def received_message(self, src: str, message: SurrogateGenerationMessage) -> None:
+        """Handle received messages for the surrogate protocol.
 
-            # if self.update_memory() and self.primary:
-            #     self.qc_delay = self.owner.qchannels[self.middle].delay
-            #     message = sq.EntanglementGenerationMessage(sq.GenerationMsgType.NEGOTIATE,
-            #                                                 self.remote_protocol_name,
-            #                                                 protocol_type=self.protocol_type,
-            #                                                 qc_delay=self.qc_delay)
-            #     self.owner.send_message(self.remote_node_name, message)
+        Args:
+            src (str): The source node name.
+            message (SurrogateGenerationMessage): The received message.
+        """
+        if self.surrogate_parameter_is_set():
+            if message.msg_type == sq.GenerationMsgType.NEGOTIATE: # non-primary receives NEGOTIATE message from primary
+                # Handle negotiation message
+                sq.log.logger.info(f"{self.owner.name} {self.name} received NEGOTIATE message from {src} at time {message.time}")
+                entanglement_succeed_time = message.time
+                process = sq.Process(self, "entanglement_succeed", [])
+                event = sq.Event(entanglement_succeed_time, process)
+                self.owner.timeline.schedule(event)
+                self.scheduled_events.append(event)
+                message = SurrogateGenerationMessage(sq.GenerationMsgType.NEGOTIATE_ACK, self.remote_protocol_name,
+                                                    self.protocol_type)
+                self.owner.send_message(src, message)
+
+            elif message.msg_type == sq.GenerationMsgType.NEGOTIATE_ACK: # primary receives ACK message from non-primary
+                sq.log.logger.info(f"{self.owner.name} {self.name} received NEGOTIATE_ACK message from {src}")
+                # do nothing
+        else:
+            super().received_message(src, message)
+
+    def entanglement_succeed(self) -> None:
+        """Handle the entanglement succeed event.
+        """
+        sq.log.logger.info(f"{self.owner.name} {self.name} surrogate: entanglement succeed at {self.owner.timeline.now()}")
+        quantum_manager = self.owner.timeline.quantum_manager
+        self_key = self._qstate_key
+        remote_memory: sq.Memory = self.owner.timeline.get_entity_by_name(self.remote_memo_id)
+        remote_key = remote_memory.qstate_key
+        keys = [self_key, remote_key]
+        if self_key not in quantum_manager.states:
+            in_fidelity = 1 - self.raw_fidelity
+            x_elem, y_elem, z_elem = (error * in_fidelity for error in self.raw_epr_errors)
+            state = [self.raw_fidelity, z_elem, x_elem, y_elem]
+            quantum_manager.set(keys, state)
+            # decoherence not done yet
+        self._entanglement_succeed()
 
 
 @sq.EntanglementGenerationB.register(SINGLE_HERALDED_SURROGATE)

@@ -26,7 +26,9 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--attenuation", type=float, default=0.0002)
     parser.add_argument("-cdn", "--classical_delay_node", type=float, default=0.1, help="classical delay in ms for each node")
     parser.add_argument("-d", "--dir", type=Path, default=Path("link"))
-    parser.add_argument("-st", "--stop_time", type=float, default=3 * SECOND, help="stop time in seconds")
+    parser.add_argument("-st", "--stop_time", type=float, default=1002 * SECOND, help="stop time in seconds")
+    parser.add_argument("-s", "--surrogate", action='store_true', help="use surrogate model")
+    parser.add_argument("-el", "--event_log", action='store_true', help="enable event log")
 
     args = parser.parse_args()
 
@@ -57,16 +59,19 @@ if __name__ == "__main__":
         for rule in diabled_rules:
             router.disable_rule(rule)
 
-    # set log
-    file_name = (f"{config_file}_ld={args.link_distance:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_"
-                 f"a={args.attenuation:g}_cdn={args.classical_delay_node:g}")
+    # summary log
+    file_name = (f"{config_file}_s={args.surrogate}_ld={args.link_distance:g}_me={args.memory_efficiency:g}_"
+                 f"de={args.detector_efficiency:g}_a={args.attenuation:g}_cdn={args.classical_delay_node:g}")
     log_filename = args.dir / "log" / f"{file_name}.log"
+    # event log
     log_filename.parent.mkdir(parents=True, exist_ok=True)
-    log.set_logger(__name__, tl, str(log_filename) + '.event')
-    log.set_logger_level('DEBUG')
-    modules = ['request_app', 'swapping_bds', 'single_heralded', 'resource_manager']
-    for module in modules:
-        log.track_module(module)
+    if args.event_log:
+        log.set_logger(__name__, tl, str(log_filename) + '.event')
+        log.set_logger_level('INFO')
+        modules = ['request_app', 'swapping_bds', 'single_heralded', 'resource_manager', 'single_heralded_surrogate']
+        modules = ['timeline']
+        for module in modules:
+            log.track_module(module)
 
     # set traffic and applications
     traffic_seed = 0
@@ -89,7 +94,8 @@ if __name__ == "__main__":
 
     # kickoff the simulation
     tl.init()
-    SingleHeraldedASurrogate.set_surrogate_parameter_from_timeline(tl)
+    if args.surrogate:
+        SingleHeraldedASurrogate.set_surrogate_parameter_from_timeline(tl)
     tl.run()
 
     time_to_serve_dict = defaultdict(float)
@@ -116,5 +122,5 @@ if __name__ == "__main__":
     mylog = open(log_filename, "w")
     for reservation, time_to_serve in log_samples:
         mylog.write(f"{reservation}, {time_to_serve}\n")
-    mylog.write(f"Average time to serve: {sum(tts_list) / len(tts_list):.3f} ms\n")
+    mylog.write(f"Average time to serve: {sum(tts_list) / len(tts_list):.3f} ms. Total events simulated: {tl.run_counter}\n")
     mylog.close()
