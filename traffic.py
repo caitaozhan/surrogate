@@ -28,7 +28,7 @@ class Traffic:
                 # self.distributions['router_2'] = {'router_5': lambda: np.random.exponential(scale=1/20)}   # 20 requests per second
             case topology if topology.startswith('linear_'):
                 nodes = int(topology.removeprefix('linear_'))
-                self.distributions['router_0'] = {f'router_{nodes - 1}': lambda: 1}  # 1 requests per second
+                self.distributions['router_0'] = {f'router_{nodes - 1}': lambda: 10}  # one requests every 10 second
                 # self.distributions[f'router_{nodes - 1}'] = {'router_0': lambda: 1}  # 1 requests per second
             case _:
                 raise ValueError(f"Unsupported config file: {self.config_file}")

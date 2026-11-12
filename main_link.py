@@ -26,9 +26,10 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--attenuation", type=float, default=0.0002)
     parser.add_argument("-cdn", "--classical_delay_node", type=float, default=0.1, help="classical delay in ms for each node")
     parser.add_argument("-d", "--dir", type=Path, default=Path("link"))
-    parser.add_argument("-st", "--stop_time", type=float, default=1002 * SECOND, help="stop time in seconds")
+    parser.add_argument("-st", "--stop_time", type=float, default=1002, help="stop time in seconds")
     parser.add_argument("-s", "--surrogate", action='store_true', help="use surrogate model")
     parser.add_argument("-el", "--event_log", action='store_true', help="enable event log")
+    parser.add_argument("-sl", "--summary_log", action='store_true', help="enable summary log")
 
     args = parser.parse_args()
 
@@ -36,7 +37,7 @@ if __name__ == "__main__":
     config_file_path = f"config/{config_file}.json"
     with open(config_file_path, 'r') as f:
         config = json.load(f)
-    config['stop_time'] = args.stop_time
+    config['stop_time'] = args.stop_time * SECOND
     router_template = config['templates']['router_template']
     router_template['MemoryArray']['efficiency'] = args.memory_efficiency
 
@@ -69,7 +70,7 @@ if __name__ == "__main__":
         log.set_logger(__name__, tl, str(log_filename) + '.event')
         log.set_logger_level('INFO')
         modules = ['request_app', 'swapping_bds', 'single_heralded', 'resource_manager', 'single_heralded_surrogate']
-        modules = ['timeline']
+        modules = ['timeline', 'main_link']
         for module in modules:
             log.track_module(module)
 
@@ -115,12 +116,15 @@ if __name__ == "__main__":
     h5_filename = args.dir / "h5" / f"{file_name}.h5"
     HDF5(h5_filename).save_link_data(parameters, tts_list)
 
-    log_samples = list(zip(reservation_list, tts_list))
-    if len(log_samples) > 20:
-        log_samples = log_samples[:10] + log_samples[-10:]
+    # summary log
+    if args.summary_log:
+        log_samples = list(zip(reservation_list, tts_list))
+        if len(log_samples) > 20:
+            log_samples = log_samples[:10] + log_samples[-10:]
+        mylog = open(log_filename, "w")
+        for reservation, time_to_serve in log_samples:
+            mylog.write(f"{reservation}, {time_to_serve}\n")
+        mylog.write(f"Average time to serve: {sum(tts_list) / len(tts_list):.3f} ms. Total events simulated: {tl.run_counter}\n")
+        mylog.close()
 
-    mylog = open(log_filename, "w")
-    for reservation, time_to_serve in log_samples:
-        mylog.write(f"{reservation}, {time_to_serve}\n")
-    mylog.write(f"Average time to serve: {sum(tts_list) / len(tts_list):.3f} ms. Total events simulated: {tl.run_counter}\n")
-    mylog.close()
+    sq.log.logger.info(f"Average time to serve: {sum(tts_list) / len(tts_list):.3f} ms. Total events simulated: {tl.run_counter}")

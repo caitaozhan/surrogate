@@ -42,7 +42,7 @@ class RequestAppTimeToServe(RequestApp):
         self.entanglement_fidelities = defaultdict(list)  # reservation: list[float]
         self.traffic_distributions: dict = {}
         self.outages: list = []
-        self.request_duration = 500 * MILLISECOND
+        self.request_duration = 5000 * MILLISECOND
         self.memo_size = 1
         self.fidelity = 0.1
         self.entanglement_number = 1
