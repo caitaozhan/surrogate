@@ -69,7 +69,9 @@ class SingleHeraldedASurrogate(sq.SingleHeraldedA):
         qchannel_transmission_probability (dict[str, float]): Quantum channel name to its transmission efficiency.
         detector_efficiency (dict[str, float]): Detector name to efficiency.
         bsm_success_rate (dict[str, float]): BSM name to success rate.
-    
+        cchannel_delay (dict[str, float]): Classical channel name to its delay.
+        surrogates (dict[tuple[str, str], tuple[float, rv_discrete_frozen]]): (primary node, non-primary node) to surrogate.
+        
     Note: The class attributes should be set at the beginning of the simulation. 
           If the class attributes are not all set, the surrogate will reduce to the original SingleHeraldedA.
     """

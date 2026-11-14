@@ -87,7 +87,8 @@ def sample_chain_configurations(total_configurations: int, parameter_ranges: dic
         nodes = int(rng.integers(int(parameter_ranges["number_of_nodes"][0]), int(parameter_ranges["number_of_nodes"][1]) + 1))
         link_distances = tuple(rng.integers(int(parameter_ranges["link_distance"][0]), int(parameter_ranges["link_distance"][1]) + 1,
                                             size=nodes - 1).tolist())
-        configuration = (link_distances, sample_decimal(rng, parameter_ranges["memory_efficiency"], 2),
+        configuration = (link_distances, 
+                         sample_decimal(rng, parameter_ranges["memory_efficiency"], 2),
                          sample_decimal(rng, parameter_ranges["detector_efficiency"], 2),
                          sample_decimal(rng, parameter_ranges["attenuation"], 5),
                          sample_decimal(rng, parameter_ranges["classical_delay_node"], 3),

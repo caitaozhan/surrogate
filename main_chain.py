@@ -2,17 +2,18 @@
 
 import argparse
 from pathlib import Path
-
+import sequence as sq
 from sequence.topology.router_net_topo import RouterNetTopo
 from sequence.utils.classical_delay import update_cchannel_delay
 from sequence.utils.config_generator_cli import generate_config
 from sequence.constants import MILLISECOND, SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM
+from sequence.resource_management.reservation_rule_registry import EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END
 from request_app import RequestAppTimeToServe
 from traffic import Traffic
 from utils import HDF5, build_linear_variable_length, configure_simulation
+from repeater_chain_surrogate import REPEATER_CHAIN_SURROGATE, RepeaterChainASurrogate
 
-
-configure_simulation(SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM)
+configure_simulation(REPEATER_CHAIN_SURROGATE, BELL_DIAGONAL_STATE_FORMALISM)
 
 
 def generate_linear_config(args) -> dict:
@@ -91,6 +92,14 @@ if __name__ == "__main__":
     update_cchannel_delay(topology, args.classical_delay_node * 1000, args.classical_delay_hop * 1000) # ms to us
     tl = topology.tl
 
+    # disable purification and swapping
+    router: sq.QuantumRouter
+    # diabled_rules = [EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END]
+    diabled_rules = [EP_AWAIT, EP_REQUEST]
+    for router in topology.get_nodes_by_type(sq.RouterNetTopo.QUANTUM_ROUTER):
+        for rule in diabled_rules:
+            router.disable_rule(rule)
+
     link_distances = "-".join(f"{distance:g}" for distance in args.link_distances)
     file_name = (f"n={number_of_nodes}_lds={link_distances}_sp={args.swapping_probability:g}_if={args.initial_fidelity:g}_ct={args.coherence_time:g}_"
                  f"cdh={args.classical_delay_hop:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_"
@@ -117,6 +126,7 @@ if __name__ == "__main__":
         node_seed += 1
 
     tl.init()
+    RepeaterChainASurrogate.set_surrogate_parameter(tl, args.classical_delay_node, args.classical_delay_hop)
     tl.run()
 
     samples = {}
