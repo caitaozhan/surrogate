@@ -11,18 +11,17 @@ REPEATER_CHAIN_SURROGATE = "repeater_chain_surrogate"
 class RepeaterChainASurrogate(sq.EntanglementGenerationA):
     """A surrogate for entanglement generation in a repeater chain.
 
-    
     Class Attributes:
-        link_distance: dict[str, float] = None                     # link name to its distance
-        memory_efficiency: float = None                 # memory name to its efficiency
-        detector_efficiency: float = None               # detector name to efficiency
-        attenuation: float = None                                  # channel attenuation
-        swapping_probability: float = None              # swapping operation success probability
-        classical_delay_node: float = None              # classical delay
-        classical_delay_hop: float = None               # hop delay
-        initial_fidelity: float = None                             # initial fidelity of the entangled state
-        coherence_time: float = None                               # coherence time of the quantum memory
-        surrogates: dict[tuple[str, ...], nn.Module]] = {}         # (node, ...) to surrogate
+        link_distance: dict[str, float] = None                # link name to its distance
+        attenuation: float = None                             # quantum channel attenuation
+        memory_efficiency: float = None                       # memory efficiency
+        detector_efficiency: float = None                     # detector efficiency
+        swapping_probability: float = None                    # swapping operation success probability
+        classical_delay_node: float = None                    # classical delay
+        classical_delay_hop: float = None                     # hop delay
+        initial_fidelity: float = None                        # initial fidelity of the entangled state
+        coherence_time: float = None                          # coherence time of the quantum memory
+        surrogates: dict[tuple[str, ...], nn.Module]] = {}    # (node, ...) to surrogate model
     """
 
     link_distance: dict[str, float] = {}
@@ -34,6 +33,7 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
     classical_delay_hop: float = None
     initial_fidelity: float = None
     coherence_time: float = None
+    surrogates: dict[tuple[str, ...], nn.Module] = {}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -53,15 +53,16 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
         link_distance = {}
 
         for name, entity in timeline.entities.items():
-            if isinstance(entity, sq.ClassicalChannel):
+            if isinstance(entity, sq.ClassicalChannel) and 'BSM' not in entity.name:
                 link_distance[name] = entity.distance
+            if isinstance(entity, sq.QuantumChannel):
                 if cls.attenuation is None:
                     cls.attenuation = entity.attenuation
             elif isinstance(entity, sq.Memory):
                 if cls.memory_efficiency is None:
                     cls.memory_efficiency = entity.efficiency
                 if cls.initial_fidelity is None:
-                    cls.initial_fidelity = entity.fidelity
+                    cls.initial_fidelity = entity.raw_fidelity
                 if cls.coherence_time is None:
                     cls.coherence_time = entity.coherence_time
             elif isinstance(entity, sq.QuantumRouter):
