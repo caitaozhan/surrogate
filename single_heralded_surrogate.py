@@ -5,12 +5,11 @@ from scipy.stats import geom
 from scipy.stats._distn_infrastructure import rv_discrete_frozen
 
 import sequence as sq
-from sequence.message import Message
 
 SINGLE_HERALDED_SURROGATE = "single_heralded_surrogate"
 
 
-class SurrogateGenerationMessage(Message):
+class SurrogateGenerationMessage(sq.Message):
     """Message used by surrogate entanglement generation protocols.
 
     Attributes:
