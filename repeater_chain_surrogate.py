@@ -15,17 +15,20 @@ class RepeaterChainSurrogateMessage(sq.Message):
         msg_type (sq.GenerationMsgType): defines the message type.
         receiver (str): name of destination protocol instance.
         protocol_type (str): identifies the generation protocol.
+        reservation (sq.Reservation): the reservation associated with the entanglement generation.
+        memo_id (str): the identifier of the memory involved in the entanglement generation.
         time (int): surrogate time (if `msg_type == NEGOTIATE`).
+        fidelity (float): the fidelity of the generated entangled pair. (if `msg_type == NEGOTIATE`)
     """
 
-    __slots__ = ["time", "fidelity", "reservation"]
-
-    def __init__(self, msg_type: sq.GenerationMsgType, protocol_type: str, reservation: sq.Reservation, **kwargs):
+    def __init__(self, msg_type: sq.GenerationMsgType, protocol_type: str, reservation: sq.Reservation, memo_id: str, **kwargs):
         super().__init__(msg_type, receiver=REPEATER_CHAIN_SURROGATE)
         self.protocol_type = protocol_type
         self.reservation = reservation
+        self.memo_id: str = memo_id
         self.time: int | None = None        # the entanglement succeed time computed from the surrogate
         self.fidelity: float | None = None  # the fidelity of the generated entangled pair
+
 
         fields = {sq.GenerationMsgType.NEGOTIATE: ["time", "fidelity"],
                   sq.GenerationMsgType.NEGOTIATE_ACK: []}
@@ -66,7 +69,8 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
         primary: bool = False  # the primary node in the chain is the initiator
     """
 
-    link_distance: dict[str, float] = {}
+    link_distance: dict[str, float] = None
+    cchannel_delay: dict[str, int] = None
     attenuation: float = None
     memory_efficiency: float = None
     detector_efficiency: float = None
@@ -81,7 +85,7 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
         super().__init__(owner, name, middle, other, memory)
         self.protocol_type = REPEATER_CHAIN_SURROGATE
         self.name = REPEATER_CHAIN_SURROGATE # every protocol instance has the same name
-        self.others: list[str] = [] # if the node is the primary, this stores the other nodes in the chain
+        self.fidelity: float = 0
 
     @classmethod
     def set_surrogate_parameter(cls, timeline: sq.Timeline, classical_delay_node: float, classical_delay_hop: float) -> None:
@@ -95,10 +99,12 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
         cls.classical_delay_node = classical_delay_node
         cls.classical_delay_hop = classical_delay_hop
         link_distance = {}
+        cchannel_delay = {}
 
         for name, entity in timeline.entities.items():
             if isinstance(entity, sq.ClassicalChannel) and 'BSM' not in entity.name:
                 link_distance[name] = entity.distance
+                cchannel_delay[name] = entity.delay
             if isinstance(entity, sq.QuantumChannel):
                 if cls.attenuation is None:
                     cls.attenuation = entity.attenuation
@@ -117,6 +123,7 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
                     cls.detector_efficiency = entity.efficiency
 
         cls.link_distance = link_distance
+        cls.cchannel_delay = cchannel_delay
 
     def surrogate_parameater_is_set(self) -> bool:
         """Check if all surrogate parameters are set.
@@ -132,11 +139,18 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
                     self.coherence_time is not None,
                     self.swapping_probability is not None,
                     self.detector_efficiency is not None,
-                    self.link_distance is not None])
+                    self.link_distance is not None,
+                    self.cchannel_delay is not None])
 
     def _entanglement_succeed(self):
         """"""
-        pass
+        sq.log.logger.info(f'{self.owner.name} successful entanglement of memory {self.memory}')
+        self.memory.entangled_memory['node_id'] = self.remote_node_name
+        self.memory.entangled_memory['memo_id'] = self.remote_memo_id
+        self.memory.fidelity = self.fidelity
+
+        self.update_resource_manager(self.memory, sq.MemoryInfo.ENTANGLED)
+
 
     def emit_event(self):
         """"""
@@ -156,20 +170,45 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
         self.remote_memo_id = None
         self.primary = True if self.owner.name == self.rule.reservation.path[0] else False
 
+    def get_cchannel_name(self, node_name: str, other_node_name: str) -> str:
+        """Get the classical channel name between the given node and other node.
+
+        Args:
+            node_name (str): The name of the node.
+            other_node_name (str): The name of the other node.
+
+        Returns:
+            str: The name of the classical channel.
+        """
+        return f"cc-{node_name}-{other_node_name}"
+
     def start(self):
         """"""
         if self.surrogate_parameater_is_set() is False:
             raise ValueError("Surrogate parameters are not set.")
         if self.primary: # only the protocol at primary node starts, protocol at all other nodes waits
             # calculate the time and fidelity from the surrogate
+            sq.log.logger.info(f'{self.memory.name}: primary node infers the time and fidelity')
             time = 100 * MILLISECOND
-            fidelity = 0.8
+            self.fidelity = 0.8
             path = self.rule.reservation.path
             n = len(path)
-            for i in range(1, n):
-                message = RepeaterChainSurrogateMessage(sq.GenerationMsgType.NEGOTIATE, REPEATER_CHAIN_SURROGATE, 
-                                                        self.rule.reservation, time=time, fidelity=fidelity)
-                self.owner.send_message(path[i], message)
+            assert n >= 2 and self.owner.name == path[0], f"Invalid path and primary node: {path}, {self.owner.name}"
+            cchannel_name = self.get_cchannel_name(path[0], path[1])
+            cchannel_delay = self.cchannel_delay.get(cchannel_name)
+            entanglement_succeed_time = self.owner.timeline.now() - 2*cchannel_delay + time
+            process = sq.Process(self, "entanglement_succeed", [self.fidelity])
+            event = sq.Event(entanglement_succeed_time, process)
+            self.owner.timeline.schedule(event)
+            self.scheduled_events.append(event)
+            # send the (time, fidelity) message to the responder
+            self.remote_node_name = path[-1]
+            message = RepeaterChainSurrogateMessage(sq.GenerationMsgType.NEGOTIATE, REPEATER_CHAIN_SURROGATE, 
+                                                    self.rule.reservation, self.memory.name, 
+                                                    time=entanglement_succeed_time, fidelity=self.fidelity)
+            self.owner.send_message(self.remote_node_name, message)
+        else:
+            sq.log.logger.info(f'{self.memory.name}: non-primary node do nothing at start()')
 
     def received_message(self, src: str, msg: RepeaterChainSurrogateMessage):
         """Handle received messages.
@@ -178,12 +217,50 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
             src (str): The source of the message.
             msg (RepeaterChainSurrogateMessage): The received message.
         """
-        if self.surrogate_parameater_is_set() is False:
-            raise ValueError("Surrogate parameters are not set.")
         if msg.reservation == self.rule.reservation: # make sure talking to the correct protocol
-            if msg.msg_type == sq.GenerationMsgType.NEGOTIATE:
-                # handle the negotiation message
-                pass
+            if self.surrogate_parameater_is_set() is False:
+                raise ValueError("Surrogate parameters are not set.")
+            if msg.msg_type == sq.GenerationMsgType.NEGOTIATE: # the responder receives the negotiation message
+                sq.log.logger.info(f"{self.memory.name}: Handling NEGOTIATE message from {src}")
+                entanglement_succeed_time = msg.time
+                self.fidelity = msg.fidelity
+                self.remote_node_name = src
+                self.remote_memo_id = msg.memo_id
+                process = sq.Process(self, "entanglement_succeed", [self.fidelity])
+                event = sq.Event(entanglement_succeed_time, process)
+                self.owner.timeline.schedule(event)
+                self.scheduled_events.append(event)
+                message = RepeaterChainSurrogateMessage(sq.GenerationMsgType.NEGOTIATE_ACK, REPEATER_CHAIN_SURROGATE, 
+                                                        self.rule.reservation, self.memory.name)
+                self.owner.send_message(src, message)
+
+            elif msg.msg_type == sq.GenerationMsgType.NEGOTIATE_ACK:
+                sq.log.logger.info(f"{self.memory.name}: Received NEGOTIATE_ACK from {src}")
+                self.remote_memo_id = msg.memo_id
+            
+    def entanglement_succeed(self, fidelity: float):
+        """Handle the entanglement succeed event.
+
+        Args:
+            fidelity (float): The fidelity of the entanglement.
+        """
+        sq.log.logger.info(f"{self.memory.name}: Entanglement succeed with fidelity {fidelity}")
+        if not (self.primary or self.owner.name == self.rule.reservation.path[-1]): # first node or last node of the chain
+            raise Exception("Entanglement succeed called on intermediate nodes.")
+        quantum_manager = self.owner.timeline.quantum_manager
+        self_key = self._qstate_key
+        remote_memory: sq.Memory = self.owner.timeline.get_entity_by_name(self.remote_memo_id)
+        remote_key = remote_memory.qstate_key
+        keys = [self_key, remote_key]
+        if self_key not in quantum_manager.states:
+            in_fidelity = 1 - fidelity
+            raw_epr_errors = [1/3, 1/3, 1/3]
+            x_elem, y_elem, z_elem = (error * in_fidelity for error in raw_epr_errors)
+            state = [fidelity, z_elem, x_elem, y_elem]
+            quantum_manager.set(keys, state)
+            # decoherence not done yet
+        self._entanglement_succeed()
+
 
 @sq.EntanglementGenerationB.register(REPEATER_CHAIN_SURROGATE)
 class RepeaterChainBSurrogate(sq.EntanglementGenerationB):

@@ -3,7 +3,6 @@
 import argparse
 from pathlib import Path
 import sequence as sq
-from sequence.topology.router_net_topo import RouterNetTopo
 from sequence.utils.classical_delay import update_cchannel_delay
 from sequence.utils.config_generator_cli import generate_config
 from sequence.constants import MILLISECOND, SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM
@@ -82,24 +81,27 @@ if __name__ == "__main__":
     # simulation parameters
     parser.add_argument("-d", "--dir", type=Path, default=Path("chain"))
     parser.add_argument("-st", "--stop_time", type=float, default=2002, help="stop time in seconds")
+    parser.add_argument("-el", "--event_log", action='store_true', help="enable event log")
+    parser.add_argument("-sl", "--summary_log", action='store_true', help="enable summary log")
     args = parser.parse_args()
     number_of_nodes = len(args.link_distances) + 1
 
     config = generate_linear_config(args)
 
-    topology = RouterNetTopo(config)
+    topology = sq.RouterNetTopo(config)
     # contains # 5, 9
     update_cchannel_delay(topology, args.classical_delay_node * 1000, args.classical_delay_hop * 1000) # ms to us
     tl = topology.tl
 
     # disable purification and swapping
     router: sq.QuantumRouter
-    # diabled_rules = [EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END]
-    diabled_rules = [EP_AWAIT, EP_REQUEST]
+    diabled_rules = [EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END]
+    # diabled_rules = [EP_AWAIT, EP_REQUEST]
     for router in topology.get_nodes_by_type(sq.RouterNetTopo.QUANTUM_ROUTER):
         for rule in diabled_rules:
             router.disable_rule(rule)
 
+    # summary log
     link_distances = "-".join(f"{distance:g}" for distance in args.link_distances)
     file_name = (f"n={number_of_nodes}_lds={link_distances}_sp={args.swapping_probability:g}_if={args.initial_fidelity:g}_ct={args.coherence_time:g}_"
                  f"cdh={args.classical_delay_hop:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_"
@@ -107,12 +109,20 @@ if __name__ == "__main__":
     log_filename = args.dir / "log" / f"{file_name}.log"
     h5_filename = args.dir / "h5" / f"{file_name}.h5"
     log_filename.parent.mkdir(parents=True, exist_ok=True)
+    # event log
+    if args.event_log:
+        sq.log.set_logger(__name__, tl, str(log_filename) + '.event')
+        sq.log.set_logger_level('INFO')
+        # modules = ['request_app', 'swapping_bds', 'single_heralded', 'resource_manager', 'single_heralded_surrogate']
+        modules = ['timeline', 'main_link', 'repeater_chain_surrogate', 'request_app']
+        for module in modules:
+            sq.log.track_module(module)
 
     traffic = Traffic(f'linear_{number_of_nodes}', seed=0)
     entanglement_number = 1
     name_to_app = {}
     node_seed = 0
-    for router in topology.get_nodes_by_type(RouterNetTopo.QUANTUM_ROUTER):
+    for router in topology.get_nodes_by_type(sq.RouterNetTopo.QUANTUM_ROUTER):
         router.set_seed(node_seed)
         node_seed += 1
         app = RequestAppTimeToServe(router)
@@ -121,7 +131,7 @@ if __name__ == "__main__":
         app.kickoff_the_first_request()
         name_to_app[router.name] = app
 
-    for bsm_node in topology.get_nodes_by_type(RouterNetTopo.BSM_NODE):
+    for bsm_node in topology.get_nodes_by_type(sq.RouterNetTopo.BSM_NODE):
         bsm_node.set_seed(node_seed)
         node_seed += 1
 
@@ -156,10 +166,11 @@ if __name__ == "__main__":
     # log_samples = list(zip(reservation_list, time_to_serve_list, fidelity_list))
     # if len(log_samples) > 20:
     #     log_samples = log_samples[:10] + log_samples[-10:]
-
-    chain_log = open(log_filename, "w")
-    # for reservation, time_to_serve, fidelity in log_samples:
-    #     chain_log.write(f"{reservation}, {time_to_serve}, {fidelity}\n")
-    chain_log.write(f"Average time to serve: {sum(time_to_serve_list) / len(time_to_serve_list):.3f} ms\n")
-    chain_log.write(f"Average fidelity: {sum(fidelity_list) / len(fidelity_list):.6f}\n")
-    chain_log.close()
+    if args.summary_log:
+        chain_log = open(log_filename, "w")
+        # for reservation, time_to_serve, fidelity in log_samples:
+        #     chain_log.write(f"{reservation}, {time_to_serve}, {fidelity}\n")
+        chain_log.write(f"Average time to serve: {sum(time_to_serve_list) / len(time_to_serve_list):.3f} ms\n")
+        chain_log.write(f"Average fidelity: {sum(fidelity_list) / len(fidelity_list):.6f}\n")
+        chain_log.close()
+    sq.log.logger.info(f"Average time to serve: {sum(time_to_serve_list) / len(time_to_serve_list):.3f} ms. Total events simulated: {tl.run_counter}")
