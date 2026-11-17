@@ -118,8 +118,8 @@ if __name__ == "__main__":
         sq.log.set_logger(__name__, tl, str(log_filename) + '.event')
         sq.log.set_logger_level('INFO')
         # modules = ['request_app', 'swapping_bds', 'single_heralded', 'resource_manager', 'single_heralded_surrogate']
-        # modules = ['timeline', 'main_link', 'repeater_chain_surrogate', 'request_app']
-        modules = ['timeline', 'main_link']
+        # modules = ['timeline', 'main_chain', 'repeater_chain_surrogate']
+        modules = ['timeline', 'main_chain']
         for module in modules:
             sq.log.track_module(module)
 
@@ -171,8 +171,8 @@ if __name__ == "__main__":
 
     if args.summary_log:
         log_samples = list(zip(reservation_list, time_to_serve_list, fidelity_list))
-        if len(log_samples) > 20:
-            log_samples = log_samples[:10] + log_samples[-10:]
+        # if len(log_samples) > 20:
+        #     log_samples = log_samples[:10] + log_samples[-10:]
         chain_log = open(log_filename, "w")
         for reservation, time_to_serve, fidelity in log_samples:
             chain_log.write(f"{reservation}, {time_to_serve}, {fidelity}\n")

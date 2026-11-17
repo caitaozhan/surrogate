@@ -190,14 +190,14 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
         """
         return f"cc-{node_name}-{other_node_name}"
 
-    def sample_from_surrogate(self, path: list[str]) -> tuple[float, float]:
+    def sample_from_surrogate(self, path: list[str]) -> tuple[int, float]:
         """Sample the time and fidelity from the surrogate model.
 
         Args:
             path (list[str]): The path of the entanglement.
 
         Returns:
-            tuple[float, float]: Sampled time in simulation units (ps) and fidelity.
+            tuple[int, float]: Sampled integer time in simulation units (ps) and fidelity.
         """
         if self.surrogate is None:
             raise ValueError("Surrogate sampler is not set.")
@@ -207,7 +207,7 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
         config["link_distances"] = [self.link_distance[self.get_cchannel_name(node, other)] for node, other in zip(path, path[1:])]
         seed = int(self.owner.get_generator().integers(0, 2**31))
         time, fidelity = self.surrogate(config, 1, seed)[0]
-        return float(time) * MILLISECOND, float(fidelity)
+        return int(time * MILLISECOND), float(fidelity)
 
     def start(self):
         """"""
@@ -222,6 +222,7 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
             cchannel_name = self.get_cchannel_name(path[0], path[1])
             cchannel_delay = self.cchannel_delay.get(cchannel_name)
             entanglement_succeed_time = self.owner.timeline.now() - 2*cchannel_delay + time
+            entanglement_succeed_time = self.validate_entanglement_succeed_time(entanglement_succeed_time, path)
             process = sq.Process(self, "entanglement_succeed", [self.fidelity])
             event = sq.Event(entanglement_succeed_time, process)
             self.owner.timeline.schedule(event)
@@ -234,6 +235,23 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
             self.owner.send_message(self.remote_node_name, message)
         else:
             sq.log.logger.info(f'{self.memory.name}: non-primary node do nothing at start()')
+
+    def validate_entanglement_succeed_time(self, entanglement_succeed_time: int, path: list[str]) -> int:
+        """Return the entanglement succeed time adjusted for classical communication delay.
+
+        Args:
+            entanglement_succeed_time (int): The entanglement succeed time in simulation units (ps).
+            path (list[str]): The path of the entanglement.
+
+        Returns:
+            int: The original or adjusted entanglement succeed time in ps.
+        """
+        now = self.owner.timeline.now()
+        cc_channel_name = self.get_cchannel_name(path[0], path[-1])
+        cc_channel_delay = self.cchannel_delay.get(cc_channel_name)
+        if entanglement_succeed_time < now + 2 * cc_channel_delay:
+            entanglement_succeed_time = now + 2 * cc_channel_delay + 1
+        return entanglement_succeed_time
 
     def received_message(self, src: str, msg: RepeaterChainSurrogateMessage):
         """Handle received messages.
