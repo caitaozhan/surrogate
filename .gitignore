@@ -10,3 +10,9 @@ hdf5/
 *.npz
 models/*
 tuning/*
+
+# Figures embedded in the README
+!/figures/repeater-chain-execution-time.png
+!/figures/repeater-chain-executed-events.png
+!/figures/single-link-execution-time.png
+!/figures/single-link-executed-events.png
