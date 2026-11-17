@@ -8,7 +8,11 @@ time
 hdf5/
 *.log
 *.npz
+*.pt
+*.json
 models/*
+!/models/combo_big_lr_validation_nll=-0.8771663870.pt
+!/models/combo_big_lr_validation_nll=-0.8771663870.json
 tuning/*
 
 # Figures embedded in the README
