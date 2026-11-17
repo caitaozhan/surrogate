@@ -2,7 +2,11 @@
 """
 
 import sequence as sq
-from torch import nn
+import torch
+from pathlib import Path
+from typing import Callable
+import numpy as np
+from train_surrogate_chain import GLOBAL_FEATURE_NAMES, build_condition_sampler, load_model
 
 REPEATER_CHAIN_SURROGATE = "repeater_chain_surrogate"
 from sequence.constants import MILLISECOND
@@ -29,7 +33,6 @@ class RepeaterChainSurrogateMessage(sq.Message):
         self.time: int | None = None        # the entanglement succeed time computed from the surrogate
         self.fidelity: float | None = None  # the fidelity of the generated entangled pair
 
-
         fields = {sq.GenerationMsgType.NEGOTIATE: ["time", "fidelity"],
                   sq.GenerationMsgType.NEGOTIATE_ACK: []}
 
@@ -54,17 +57,18 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
     """A surrogate for entanglement generation in a repeater chain.
 
     Class Attributes:
-        link_distance: dict[str, float] = None             # link name to its distance
-        attenuation: float = None                          # quantum channel attenuation
-        memory_efficiency: float = None                    # memory efficiency
-        detector_efficiency: float = None                  # detector efficiency
-        swapping_probability: float = None                 # swapping operation success probability
-        classical_delay_node: float = None                 # classical delay
-        classical_delay_hop: float = None                  # hop delay
-        initial_fidelity: float = None                     # initial fidelity of the entangled state
-        coherence_time: float = None                       # coherence time of the quantum memory
-        surrogates: dict[tuple[str, ...], nn.Module]] = {} # (node, ...) to surrogate model
-    
+        link_distance: dict[str, float] = None     # link name to its distance
+        attenuation: float = None                  # quantum channel attenuation
+        memory_efficiency: float = None            # memory efficiency
+        detector_efficiency: float = None          # detector efficiency
+        swapping_probability: float = None         # swapping operation success probability
+        classical_delay_node: float = None         # classical delay
+        classical_delay_hop: float = None          # hop delay
+        initial_fidelity: float = None             # initial fidelity of the entangled state
+        coherence_time: float = None               # coherence time of the quantum memory
+        surrogate: Callable[..., np.ndarray] = None  # shared conditional sampler
+        model_path: str                            # the path for the surrogate model
+        
     Instance Attributes:
         primary: bool = False  # the primary node in the chain is the initiator
     """
@@ -79,7 +83,8 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
     classical_delay_hop: float = None
     initial_fidelity: float = None
     coherence_time: float = None
-    surrogates: dict[tuple[str, ...], nn.Module] = {}
+    model_path: str = "models/combo_big_lr_validation_nll=-0.8771663870.pt"
+    surrogate: Callable[..., np.ndarray] | None = None
 
     def __init__(self, owner: sq.Node, name: str, middle: str, other: str, memory: sq.Memory):
         super().__init__(owner, name, middle, other, memory)
@@ -96,6 +101,10 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
             classical_delay_node (float): The classical delay for the node.
             classical_delay_hop (float): The classical delay for each hop.
         """
+        if cls.surrogate is None:
+            artifact = load_model(Path(cls.model_path), torch.device("cpu"))
+            cls.surrogate = staticmethod(build_condition_sampler(artifact, torch.device("cpu")))
+
         cls.classical_delay_node = classical_delay_node
         cls.classical_delay_hop = classical_delay_hop
         link_distance = {}
@@ -148,12 +157,11 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
         self.memory.entangled_memory['node_id'] = self.remote_node_name
         self.memory.entangled_memory['memo_id'] = self.remote_memo_id
         self.memory.fidelity = self.fidelity
-
         self.update_resource_manager(self.memory, sq.MemoryInfo.ENTANGLED)
 
-
     def emit_event(self):
-        """"""
+        """Not needed for the surrogate protocol
+        """
         pass
 
     def set_others(self, protocol: str, node: str, memories: list[str]):
@@ -182,6 +190,25 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
         """
         return f"cc-{node_name}-{other_node_name}"
 
+    def sample_from_surrogate(self, path: list[str]) -> tuple[float, float]:
+        """Sample the time and fidelity from the surrogate model.
+
+        Args:
+            path (list[str]): The path of the entanglement.
+
+        Returns:
+            tuple[float, float]: Sampled time in simulation units (ps) and fidelity.
+        """
+        if self.surrogate is None:
+            raise ValueError("Surrogate sampler is not set.")
+        if len(path) < 2:
+            raise ValueError("The path must contain at least two nodes.")
+        config = {name: getattr(self, name) for name in GLOBAL_FEATURE_NAMES}
+        config["link_distances"] = [self.link_distance[self.get_cchannel_name(node, other)] for node, other in zip(path, path[1:])]
+        seed = int(self.owner.get_generator().integers(0, 2**31))
+        time, fidelity = self.surrogate(config, 1, seed)[0]
+        return float(time) * MILLISECOND, float(fidelity)
+
     def start(self):
         """"""
         if self.surrogate_parameater_is_set() is False:
@@ -189,11 +216,9 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
         if self.primary: # only the protocol at primary node starts, protocol at all other nodes waits
             # calculate the time and fidelity from the surrogate
             sq.log.logger.info(f'{self.memory.name}: primary node infers the time and fidelity')
-            time = 100 * MILLISECOND
-            self.fidelity = 0.8
             path = self.rule.reservation.path
-            n = len(path)
-            assert n >= 2 and self.owner.name == path[0], f"Invalid path and primary node: {path}, {self.owner.name}"
+            time, self.fidelity = self.sample_from_surrogate(path)
+            assert len(path) >= 2 and self.owner.name == path[0], f"Invalid path and primary node: {path}, {self.owner.name}"
             cchannel_name = self.get_cchannel_name(path[0], path[1])
             cchannel_delay = self.cchannel_delay.get(cchannel_name)
             entanglement_succeed_time = self.owner.timeline.now() - 2*cchannel_delay + time
@@ -265,4 +290,3 @@ class RepeaterChainASurrogate(sq.EntanglementGenerationA):
 @sq.EntanglementGenerationB.register(REPEATER_CHAIN_SURROGATE)
 class RepeaterChainBSurrogate(sq.EntanglementGenerationB):
     pass
-

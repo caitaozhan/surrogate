@@ -12,7 +12,6 @@ from traffic import Traffic
 from utils import HDF5, build_linear_variable_length, configure_simulation
 from repeater_chain_surrogate import REPEATER_CHAIN_SURROGATE, RepeaterChainASurrogate
 
-configure_simulation(REPEATER_CHAIN_SURROGATE, BELL_DIAGONAL_STATE_FORMALISM)
 
 
 def generate_linear_config(args) -> dict:
@@ -83,27 +82,32 @@ if __name__ == "__main__":
     parser.add_argument("-st", "--stop_time", type=float, default=2002, help="stop time in seconds")
     parser.add_argument("-el", "--event_log", action='store_true', help="enable event log")
     parser.add_argument("-sl", "--summary_log", action='store_true', help="enable summary log")
+    parser.add_argument("-s", "--surrogate", action='store_true', help="enable surrogate mode")
+    
     args = parser.parse_args()
-    number_of_nodes = len(args.link_distances) + 1
-
+    
+    if args.surrogate:
+        configure_simulation(REPEATER_CHAIN_SURROGATE, BELL_DIAGONAL_STATE_FORMALISM)
+        diabled_rules = [EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END]
+    else:
+        configure_simulation(SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM)
+        diabled_rules = [EP_AWAIT, EP_REQUEST]
+    
     config = generate_linear_config(args)
-
     topology = sq.RouterNetTopo(config)
-    # contains # 5, 9
     update_cchannel_delay(topology, args.classical_delay_node * 1000, args.classical_delay_hop * 1000) # ms to us
     tl = topology.tl
 
     # disable purification and swapping
     router: sq.QuantumRouter
-    diabled_rules = [EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END]
-    # diabled_rules = [EP_AWAIT, EP_REQUEST]
     for router in topology.get_nodes_by_type(sq.RouterNetTopo.QUANTUM_ROUTER):
         for rule in diabled_rules:
             router.disable_rule(rule)
-
     # summary log
+    number_of_nodes = len(args.link_distances) + 1
     link_distances = "-".join(f"{distance:g}" for distance in args.link_distances)
-    file_name = (f"n={number_of_nodes}_lds={link_distances}_sp={args.swapping_probability:g}_if={args.initial_fidelity:g}_ct={args.coherence_time:g}_"
+    file_name = (f"n={number_of_nodes}_s={args.surrogate}_lds={link_distances}_sp={args.swapping_probability:g}_"
+                 f"if={args.initial_fidelity:g}_ct={args.coherence_time:g}_"
                  f"cdh={args.classical_delay_hop:g}_me={args.memory_efficiency:g}_de={args.detector_efficiency:g}_"
                  f"a={args.attenuation:g}_cdn={args.classical_delay_node:g}")
     log_filename = args.dir / "log" / f"{file_name}.log"
@@ -114,7 +118,8 @@ if __name__ == "__main__":
         sq.log.set_logger(__name__, tl, str(log_filename) + '.event')
         sq.log.set_logger_level('INFO')
         # modules = ['request_app', 'swapping_bds', 'single_heralded', 'resource_manager', 'single_heralded_surrogate']
-        modules = ['timeline', 'main_link', 'repeater_chain_surrogate', 'request_app']
+        # modules = ['timeline', 'main_link', 'repeater_chain_surrogate', 'request_app']
+        modules = ['timeline', 'main_link']
         for module in modules:
             sq.log.track_module(module)
 
@@ -136,7 +141,8 @@ if __name__ == "__main__":
         node_seed += 1
 
     tl.init()
-    RepeaterChainASurrogate.set_surrogate_parameter(tl, args.classical_delay_node, args.classical_delay_hop)
+    if args.surrogate:
+        RepeaterChainASurrogate.set_surrogate_parameter(tl, args.classical_delay_node, args.classical_delay_hop)
     tl.run()
 
     samples = {}
@@ -163,13 +169,13 @@ if __name__ == "__main__":
                   "initial_fidelity": args.initial_fidelity, "coherence_time": args.coherence_time}
     HDF5(h5_filename).save_chain_data(parameters, time_to_serve_list, fidelity_list)
 
-    # log_samples = list(zip(reservation_list, time_to_serve_list, fidelity_list))
-    # if len(log_samples) > 20:
-    #     log_samples = log_samples[:10] + log_samples[-10:]
     if args.summary_log:
+        log_samples = list(zip(reservation_list, time_to_serve_list, fidelity_list))
+        if len(log_samples) > 20:
+            log_samples = log_samples[:10] + log_samples[-10:]
         chain_log = open(log_filename, "w")
-        # for reservation, time_to_serve, fidelity in log_samples:
-        #     chain_log.write(f"{reservation}, {time_to_serve}, {fidelity}\n")
+        for reservation, time_to_serve, fidelity in log_samples:
+            chain_log.write(f"{reservation}, {time_to_serve}, {fidelity}\n")
         chain_log.write(f"Average time to serve: {sum(time_to_serve_list) / len(time_to_serve_list):.3f} ms\n")
         chain_log.write(f"Average fidelity: {sum(fidelity_list) / len(fidelity_list):.6f}\n")
         chain_log.close()
