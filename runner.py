@@ -213,23 +213,25 @@ def main_chain(total_configurations: int, directory: str, seed: int):
 
 
 def main_chain_surrogate_vs_simulation():
-    """Compare simulation and surrogate for 3-17 nodes with midpoint parameters."""
+    """Compare 3-17 nodes with maximum distances and attenuation, minimum efficiencies, and other midpoints."""
     directory = "chain/surrogate_vs_simulation"
     Path(directory).mkdir(parents=True, exist_ok=True)
     parameter_names = ("memory_efficiency", "detector_efficiency", "attenuation", "classical_delay_node",
                        "swapping_probability", "initial_fidelity", "coherence_time", "classical_delay_hop")
-    midpoints = tuple(sum(CHAIN_PARAMETER_RANGES[name]) / 2 for name in parameter_names)
-    link_distance = sum(CHAIN_PARAMETER_RANGES["link_distance"]) / 2
+    parameters = tuple(CHAIN_PARAMETER_RANGES[name][0] if name in ("memory_efficiency", "detector_efficiency")
+                       else CHAIN_PARAMETER_RANGES[name][1] if name == "attenuation"
+                       else sum(CHAIN_PARAMETER_RANGES[name]) / 2 for name in parameter_names)
+    link_distance = CHAIN_PARAMETER_RANGES["link_distance"][1]
     minimum_nodes, maximum_nodes = CHAIN_PARAMETER_RANGES["number_of_nodes"]
     configurations = []
     for nodes in range(minimum_nodes, maximum_nodes + 1):
         link_distances = (link_distance,) * (nodes - 1)
-        configurations.append((link_distances, *midpoints))
+        configurations.append((link_distances, *parameters))
 
     tasks = build_chain_task(["python", "main_chain.py", "-el"], configurations, directory)
     tasks += build_chain_task(["python", "main_chain.py", "-s", "-el"], configurations, directory)
     print(f"Generated {len(configurations)} configurations and {len(tasks)} comparison task(s)")
-    run_tasks([tasks[15]], parallel=1, runtime_log=str(Path(directory) / "runtime.log"))
+    run_tasks(tasks, parallel=2, runtime_log=str(Path(directory) / "runtime.log"))
 
 
 if __name__ == "__main__":

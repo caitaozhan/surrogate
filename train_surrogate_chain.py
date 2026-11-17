@@ -9,6 +9,7 @@ import math
 import time
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
@@ -747,6 +748,7 @@ def build_condition_sampler(artifact: MdnArtifact, device: torch.device) -> Call
 
     Rebuilding the model per condition dominates the cost of a sweep over a whole testing set, so
     callers that score many conditions should build one sampler and call it repeatedly.
+    Cache distributions for the 1024 most recently used conditions to avoid repeated inference.
 
     Args:
         artifact (MdnArtifact): Trained model and normalization metadata.
@@ -767,18 +769,26 @@ def build_condition_sampler(artifact: MdnArtifact, device: torch.device) -> Call
     target_mean = np.asarray(artifact["target_mean"], dtype=np.float32)
     target_std = np.asarray(artifact["target_std"], dtype=np.float32)
 
-    def sample(config: dict[str, Any], sample_count: int, seed: int) -> np.ndarray:
-        """Generate paired time-fidelity samples for one repeater-chain condition."""
-        link_distances, global_features = validate_condition(artifact, config)
+    @lru_cache(maxsize=1024)
+    def condition_distribution(distances: tuple[float, ...], globals_: tuple[float, ...]) -> torch_distributions.MixtureSameFamily:
+        """Cache each condition's predicted distribution without retaining gradients."""
+        link_distances = np.asarray(distances, dtype=np.float32)
+        global_features = np.asarray(globals_, dtype=np.float32)
         standardized_distances = (link_distances - distance_mean[0]) / distance_std[0]
         standardized_globals = (global_features - global_mean) / global_std
 
-        torch.manual_seed(seed)
         with torch.no_grad():
             distance_tensor = torch.from_numpy(standardized_distances[None, :, None]).to(device)
             padding_mask = torch.zeros((1, link_distances.size), dtype=torch.bool, device=device)
             global_tensor = torch.from_numpy(standardized_globals[None]).to(device)
-            distribution = mdn_distribution(model, distance_tensor, padding_mask, global_tensor)
+            return mdn_distribution(model, distance_tensor, padding_mask, global_tensor)
+
+    def sample(config: dict[str, Any], sample_count: int, seed: int) -> np.ndarray:
+        """Generate fresh paired samples using a cached conditional distribution."""
+        link_distances, global_features = validate_condition(artifact, config)
+        torch.manual_seed(seed)
+        distribution = condition_distribution(tuple(link_distances.tolist()), tuple(global_features.tolist()))
+        with torch.no_grad():
             standardized_samples = distribution.sample((sample_count,))[:, 0].cpu().numpy()
 
         transformed_samples = standardized_samples * target_std + target_mean
