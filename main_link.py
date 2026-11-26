@@ -12,10 +12,10 @@ from sequence.resource_management.reservation_rule_registry import EP_AWAIT, EP_
 import sequence.utils.log as log
 from request_app import RequestAppTimeToServe
 from traffic import Traffic
-from utils import HDF5, configure_simulation
+from utils import HDF5, set_type_and_formalism
 from single_heralded_surrogate import SINGLE_HERALDED_SURROGATE, SingleHeraldedASurrogate
 
-configure_simulation(SINGLE_HERALDED_SURROGATE, BELL_DIAGONAL_STATE_FORMALISM)
+set_type_and_formalism(SINGLE_HERALDED_SURROGATE, BELL_DIAGONAL_STATE_FORMALISM)
 
 
 if __name__ == "__main__":

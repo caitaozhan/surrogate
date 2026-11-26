@@ -9,11 +9,11 @@ import sequence as sq
 from networkx import Graph, path_graph, set_edge_attributes
 
 
-def configure_simulation(generation_type: str, formalism: str) -> None:
+def set_type_and_formalism(generation_type: str, formalism: str) -> None:
     """Configure the global generation type and quantum state formalism.
 
     Args:
-        generation_type (str): Entanglement generation type for both endpoint protocols.
+        generation_type (str): Entanglement generation type.
         formalism (str): Quantum state formalism for purification, swapping, and the quantum manager.
     """
     for protocol in (sq.EntanglementGenerationA, sq.EntanglementGenerationB):

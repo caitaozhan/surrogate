@@ -9,7 +9,7 @@ from sequence.constants import MILLISECOND, SINGLE_HERALDED, BELL_DIAGONAL_STATE
 from sequence.resource_management.reservation_rule_registry import EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END
 from request_app import RequestAppTimeToServe
 from traffic import Traffic
-from utils import HDF5, build_linear_variable_length, configure_simulation
+from utils import HDF5, build_linear_variable_length, set_type_and_formalism
 from repeater_chain_surrogate import REPEATER_CHAIN_SURROGATE, RepeaterChainASurrogate
 
 
@@ -87,10 +87,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if args.surrogate:
-        configure_simulation(REPEATER_CHAIN_SURROGATE, BELL_DIAGONAL_STATE_FORMALISM)
+        set_type_and_formalism(REPEATER_CHAIN_SURROGATE, BELL_DIAGONAL_STATE_FORMALISM)
         diabled_rules = [EP_AWAIT, EP_REQUEST, ES_A, ES_B, ES_B_END]
     else:
-        configure_simulation(SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM)
+        set_type_and_formalism(SINGLE_HERALDED, BELL_DIAGONAL_STATE_FORMALISM)
         diabled_rules = [EP_AWAIT, EP_REQUEST]
     
     config = generate_linear_config(args)
